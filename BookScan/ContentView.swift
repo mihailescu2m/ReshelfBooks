@@ -9,53 +9,86 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var selectedTab = 0
+    @State private var showingSearch = false
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        ZStack(alignment: .bottom) {
+            // Tab content
+            TabView(selection: $selectedTab) {
+                ScannerTabView()
+                    .tag(0)
+
+                LibraryTabView()
+                    .tag(1)
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            // Custom floating tab bar with search button
+            floatingTabBar
+        }
+        .sheet(isPresented: $showingSearch) {
+            SearchView()
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+    private var floatingTabBar: some View {
+        HStack(spacing: 12) {
+            // Tab bar
+            HStack(spacing: 0) {
+                tabButton(title: "Scan", icon: "barcode.viewfinder", tag: 0)
+                tabButton(title: "Library", icon: "books.vertical", tag: 1)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial)
+            .cornerRadius(25)
+            .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+            // Search button (always visible)
+            Button {
+                showingSearch = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .frame(width: 50, height: 50)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(25)
+                    .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
             }
         }
+        .padding(.bottom, 30)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedTab)
+    }
+
+    private func tabButton(title: String, icon: String, tag: Int) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                selectedTab = tag
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+
+                if selectedTab == tag {
+                    Text(title)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+            }
+            .foregroundColor(selectedTab == tag ? .accentColor : .secondary)
+            .padding(.horizontal, selectedTab == tag ? 16 : 12)
+            .padding(.vertical, 10)
+            .background(selectedTab == tag ? Color.accentColor.opacity(0.15) : Color.clear)
+            .cornerRadius(20)
+        }
+        .buttonStyle(.plain)
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: [Book.self, Shelf.self], inMemory: true)
 }
