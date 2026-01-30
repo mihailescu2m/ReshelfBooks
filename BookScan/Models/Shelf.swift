@@ -10,19 +10,27 @@ import SwiftData
 
 @Model
 final class Shelf {
-    var name: String
-    var dateCreated: Date
-    var sortOrder: Int
-    var isLendingShelf: Bool
+    // CloudKit requires all attributes to have default values or be optional
+    var name: String = ""
+    var dateCreated: Date = Date()
+    var sortOrder: Int = 0
+    var isLendingShelf: Bool = false
 
-    @Relationship
-    var books: [Book] = []
+    // CloudKit requires all relationships to be optional (use optional array)
+    @Relationship(deleteRule: .nullify)
+    var books: [Book]? = []
+
+    // Inverse relationship for Book.previousShelf (required by CloudKit)
+    @Relationship(deleteRule: .nullify)
+    var previousBooks: [Book]? = []
 
     init(name: String, sortOrder: Int = 0, isLendingShelf: Bool = false) {
         self.name = name
         self.dateCreated = Date()
         self.sortOrder = sortOrder
         self.isLendingShelf = isLendingShelf
+        self.books = []
+        self.previousBooks = []
     }
 }
 

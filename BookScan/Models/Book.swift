@@ -10,19 +10,21 @@ import SwiftData
 
 @Model
 final class Book {
-    var isbn: String
-    var title: String
-    var author: String
-    var yearPublished: String
+    // CloudKit requires all attributes to have default values or be optional
+    var isbn: String = ""
+    var title: String = ""
+    var author: String = ""
+    var yearPublished: String = ""
     var coverImageURL: String?
     var coverImageData: Data?
-    var dateAdded: Date
+    var dateAdded: Date = Date()
 
     @Relationship(inverse: \Shelf.books)
     var shelf: Shelf?
 
     // Stores the original shelf before lending
-    @Relationship
+    // CloudKit requires all relationships to have an inverse
+    @Relationship(inverse: \Shelf.previousBooks)
     var previousShelf: Shelf?
 
     // Computed property to check if book is currently lent

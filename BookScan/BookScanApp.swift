@@ -24,15 +24,13 @@ struct BookScanApp: App {
             Shelf.self,
         ])
 
-        // Try local storage first (CloudKit requires entitlements to be configured in Xcode)
-        // To enable CloudKit sync:
-        // 1. In Xcode: Signing & Capabilities → + Capability → iCloud → CloudKit
-        // 2. Select or create container: iCloud.memeka.BookScan
-        // 3. Change cloudKitDatabase below from .none to .private("iCloud.memeka.BookScan")
+        // CloudKit sync enabled for multi-device support
+        // Requires iCloud capability in Xcode: Signing & Capabilities → iCloud → CloudKit
+        // Container: iCloud.memeka.BookScan
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none  // Change to .private("iCloud.memeka.BookScan") after enabling iCloud capability
+            cloudKitDatabase: .private("iCloud.memeka.BookScan")
         )
 
         do {

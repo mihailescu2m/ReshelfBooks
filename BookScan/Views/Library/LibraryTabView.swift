@@ -77,7 +77,7 @@ struct LibraryTabView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
                 // Lending shelf at the top if it has books
-                if let lendingShelf = shelves.lendingShelf, !lendingShelf.books.isEmpty {
+                if let lendingShelf = shelves.lendingShelf, !(lendingShelf.books ?? []).isEmpty {
                     LendingShelfSectionView(
                         shelf: lendingShelf,
                         onBookTap: { book in
@@ -146,7 +146,7 @@ struct LibraryTabView: View {
     }
 
     private func deleteShelf(_ shelf: Shelf) {
-        for book in shelf.books {
+        for book in shelf.books ?? [] {
             book.shelf = nil
         }
         modelContext.delete(shelf)
@@ -160,7 +160,11 @@ struct LendingShelfSectionView: View {
     let onBookTap: (Book) -> Void
 
     private var sortedBooks: [Book] {
-        shelf.books.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        (shelf.books ?? []).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    private var bookCount: Int {
+        shelf.books?.count ?? 0
     }
 
     var body: some View {
@@ -172,7 +176,7 @@ struct LendingShelfSectionView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(shelf.books.count) books")
+                Text("\(bookCount) books")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -207,7 +211,11 @@ struct ShelfSectionView: View {
     @State private var showingDeleteConfirmation = false
 
     private var sortedBooks: [Book] {
-        shelf.books.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        (shelf.books ?? []).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    private var bookCount: Int {
+        shelf.books?.count ?? 0
     }
 
     var body: some View {
@@ -219,7 +227,7 @@ struct ShelfSectionView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(shelf.books.count) books")
+                Text("\(bookCount) books")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
@@ -235,7 +243,7 @@ struct ShelfSectionView: View {
                 }
             }
 
-            if shelf.books.isEmpty {
+            if (shelf.books ?? []).isEmpty {
                 Text("No books on this shelf")
                     .font(.subheadline)
                     .foregroundColor(.secondary)

@@ -256,7 +256,7 @@ struct BookDetailContent: View {
                     .foregroundColor(.primary)
                 Spacer()
                 if let shelf = shelf {
-                    Text("\(shelf.books.count) books")
+                    Text("\(shelf.books?.count ?? 0) books")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

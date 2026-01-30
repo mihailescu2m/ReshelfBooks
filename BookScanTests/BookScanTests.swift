@@ -179,7 +179,7 @@ struct ShelfModelTests {
         #expect(shelf.name == "Fiction")
         #expect(shelf.sortOrder == 5)
         #expect(shelf.isLendingShelf == false)
-        #expect(shelf.books.isEmpty)
+        #expect((shelf.books ?? []).isEmpty)
     }
 
     @Test("Lending shelf initialization")
