@@ -7,7 +7,6 @@
 
 import SwiftUI
 import SwiftData
-import Combine
 
 struct SearchView: View {
     @Environment(\.dismiss) private var dismiss

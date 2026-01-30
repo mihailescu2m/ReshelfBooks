@@ -156,6 +156,8 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
                 return 0
             case .landscapeRight:
                 return 180
+            case .unknown:
+                return angleFromViewBounds()
             @unknown default:
                 return angleFromViewBounds()
             }
@@ -184,7 +186,7 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
     private func setupCaptureSession() {
         let session = AVCaptureSession()
 
-        guard let videoCaptureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
+        guard let videoCaptureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
             showNoCameraAlert()
             return
         }

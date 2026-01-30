@@ -18,7 +18,6 @@ struct ExistingBookView: View {
     private let autoDismissSeconds: Double = 3.0
     @State private var timeRemaining: Double = 3.0
     @State private var isAutoDismissActive = true
-    @State private var timerTask: Task<Void, Never>?
 
     init(book: Book, wasReturned: Bool = false, onManualEntry: (() -> Void)? = nil) {
         self.book = book

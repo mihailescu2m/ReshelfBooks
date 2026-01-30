@@ -13,9 +13,6 @@ private let logger = Logger(subsystem: "com.bookscan", category: "App")
 
 @main
 struct BookScanApp: App {
-    @State private var showingDatabaseError = false
-    @State private var databaseErrorMessage = ""
-
     let sharedModelContainer: ModelContainer
 
     init() {
@@ -56,11 +53,6 @@ struct BookScanApp: App {
             ContentView()
                 .onAppear {
                     createLendingShelfIfNeeded()
-                }
-                .alert("Database Error", isPresented: $showingDatabaseError) {
-                    Button("OK", role: .cancel) { }
-                } message: {
-                    Text(databaseErrorMessage)
                 }
         }
         .modelContainer(sharedModelContainer)
