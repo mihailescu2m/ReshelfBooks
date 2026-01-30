@@ -186,7 +186,7 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
     private func setupCaptureSession() {
         let session = AVCaptureSession()
 
-        guard let videoCaptureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
+        guard let videoCaptureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
             showNoCameraAlert()
             return
         }
