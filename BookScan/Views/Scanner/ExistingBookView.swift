@@ -11,29 +11,31 @@ import SwiftData
 struct ExistingBookView: View {
     @Environment(\.dismiss) private var dismiss
     let book: Book
+    let wasReturned: Bool
     let onManualEntry: (() -> Void)?
 
     // Quick Scan Mode
     private let autoDismissSeconds: Double = 3.0
     @State private var timeRemaining: Double = 3.0
     @State private var isAutoDismissActive = true
-    @State private var timer: Timer?
+    @State private var timerTask: Task<Void, Never>?
 
-    init(book: Book, onManualEntry: (() -> Void)? = nil) {
+    init(book: Book, wasReturned: Bool = false, onManualEntry: (() -> Void)? = nil) {
         self.book = book
+        self.wasReturned = wasReturned
         self.onManualEntry = onManualEntry
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 60))
-                    .foregroundColor(.green)
-
-                Text("Book Found!")
-                    .font(.title)
+                Text(wasReturned ? "Book Returned" : "Book Found")
+                    .font(.title2)
                     .fontWeight(.bold)
+
+                if wasReturned {
+                    returnedBanner
+                }
 
                 bookInfoCard
 
@@ -63,13 +65,23 @@ struct ExistingBookView: View {
                     }
                 }
             }
-            .onAppear {
-                startAutoDismissTimer()
-            }
-            .onDisappear {
-                timer?.invalidate()
+            .task {
+                await startAutoDismissTimer()
             }
         }
+    }
+
+    private var returnedBanner: some View {
+        HStack {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            Text("This book has been returned to your library")
+                .font(.subheadline)
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Color.green.opacity(0.1))
+        .cornerRadius(12)
     }
 
     private var countdownSection: some View {
@@ -115,20 +127,29 @@ struct ExistingBookView: View {
         }
     }
 
-    private func startAutoDismissTimer() {
+    private func startAutoDismissTimer() async {
         timeRemaining = autoDismissSeconds
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            if timeRemaining > 0 {
+
+        // Use Swift Concurrency instead of Timer to avoid memory leaks
+        // The task is automatically cancelled when the view disappears
+        while timeRemaining > 0 && isAutoDismissActive {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+
+            // Check if task was cancelled (view disappeared)
+            if Task.isCancelled { return }
+
+            if isAutoDismissActive {
                 timeRemaining -= 0.1
-            } else {
-                timer?.invalidate()
-                dismiss()
             }
+        }
+
+        // Auto-dismiss if timer completed and still active
+        if isAutoDismissActive && !Task.isCancelled {
+            dismiss()
         }
     }
 
     private func cancelAutoDismiss() {
-        timer?.invalidate()
         withAnimation {
             isAutoDismissActive = false
         }
@@ -137,7 +158,7 @@ struct ExistingBookView: View {
     private var bookInfoCard: some View {
         HStack(spacing: 16) {
             bookCoverImage
-                .frame(width: 80, height: 120)
+                .frame(width: 100, height: 150)
                 .cornerRadius(8)
                 .shadow(radius: 4)
 
@@ -182,22 +203,8 @@ struct ExistingBookView: View {
         }
     }
 
-    @ViewBuilder
     private var bookCoverImage: some View {
-        if let imageData = book.coverImageData,
-           let uiImage = UIImage(data: imageData) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        } else {
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .overlay {
-                    Image(systemName: "book.closed.fill")
-                        .font(.title)
-                        .foregroundColor(.gray)
-                }
-        }
+        BookCoverImage(imageData: book.coverImageData, title: book.title, size: .medium)
     }
 
     private var shelfLocationCard: some View {

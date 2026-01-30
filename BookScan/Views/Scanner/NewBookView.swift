@@ -7,6 +7,9 @@
 
 import SwiftUI
 import SwiftData
+import os.log
+
+private let logger = Logger(subsystem: "com.bookscan", category: "NewBook")
 
 struct NewBookView: View {
     @Environment(\.dismiss) private var dismiss
@@ -75,15 +78,9 @@ struct NewBookView: View {
     }
 
     private var headerSection: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "plus.circle.fill")
-                .font(.system(size: 50))
-                .foregroundColor(.accentColor)
-
-            Text("Add to Library")
-                .font(.title2)
-                .fontWeight(.bold)
-        }
+        Text("Add to Library")
+            .font(.title2)
+            .fontWeight(.bold)
     }
 
     private var bookInfoSection: some View {
@@ -146,14 +143,9 @@ struct NewBookView: View {
             Image(uiImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
+                .clipped()
         } else {
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .overlay {
-                    Image(systemName: "book.closed.fill")
-                        .font(.title)
-                        .foregroundColor(.gray)
-                }
+            BookCoverImage(imageData: nil, title: metadata.title, size: .medium)
         }
     }
 
@@ -174,7 +166,7 @@ struct NewBookView: View {
                 }
             }
 
-            if shelves.isEmpty {
+            if shelves.regularShelves.isEmpty {
                 Text("No shelves yet. Create one to organize your books.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -184,7 +176,7 @@ struct NewBookView: View {
                     .cornerRadius(8)
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 140))], spacing: 12) {
-                    ForEach(shelves) { shelf in
+                    ForEach(shelves.regularShelves) { shelf in
                         shelfButton(shelf)
                     }
                 }
@@ -255,7 +247,7 @@ struct NewBookView: View {
                 }
             }
         } catch {
-            // Silently fail - we'll show placeholder
+            logger.warning("Failed to load cover image for ISBN \(metadata.isbn): \(error.localizedDescription)")
         }
     }
 }

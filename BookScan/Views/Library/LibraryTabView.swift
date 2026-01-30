@@ -21,7 +21,7 @@ struct LibraryTabView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if shelves.isEmpty && books.isEmpty {
+                if isLibraryEmpty {
                     emptyLibraryView
                 } else {
                     libraryContentView
@@ -54,6 +54,11 @@ struct LibraryTabView: View {
         }
     }
 
+    /// Check if library is truly empty (excluding lending shelf)
+    private var isLibraryEmpty: Bool {
+        shelves.regularShelves.isEmpty && books.filter { !$0.isLent }.isEmpty
+    }
+
     private var emptyLibraryView: some View {
         ContentUnavailableView {
             Label("No Books Yet", systemImage: "books.vertical")
@@ -71,7 +76,18 @@ struct LibraryTabView: View {
     private var libraryContentView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
-                ForEach(shelves) { shelf in
+                // Lending shelf at the top if it has books
+                if let lendingShelf = shelves.lendingShelf, !lendingShelf.books.isEmpty {
+                    LendingShelfSectionView(
+                        shelf: lendingShelf,
+                        onBookTap: { book in
+                            selectedBook = book
+                        }
+                    )
+                }
+
+                // Regular shelves
+                ForEach(shelves.regularShelves) { shelf in
                     ShelfSectionView(
                         shelf: shelf,
                         onBookTap: { book in
@@ -92,7 +108,7 @@ struct LibraryTabView: View {
     }
 
     private var unshelvedBooks: [Book] {
-        books.filter { $0.shelf == nil }
+        books.filter { $0.shelf == nil }.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
     private var unshelvedBooksSection: some View {
@@ -137,12 +153,62 @@ struct LibraryTabView: View {
     }
 }
 
+// MARK: - Lending Shelf Section (special styling, no delete option)
+
+struct LendingShelfSectionView: View {
+    let shelf: Shelf
+    let onBookTap: (Book) -> Void
+
+    private var sortedBooks: [Book] {
+        shelf.books.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "arrow.up.forward.circle.fill")
+                    .foregroundColor(.orange)
+                Text(shelf.name)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text("\(shelf.books.count) books")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            Text("Scan a book's barcode to return it")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 16) {
+                    ForEach(sortedBooks) { book in
+                        BookCardView(book: book) {
+                            onBookTap(book)
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color.orange.opacity(0.1))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - Regular Shelf Section
+
 struct ShelfSectionView: View {
     let shelf: Shelf
     let onBookTap: (Book) -> Void
     let onDeleteShelf: () -> Void
 
     @State private var showingDeleteConfirmation = false
+
+    private var sortedBooks: [Book] {
+        shelf.books.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -180,7 +246,7 @@ struct ShelfSectionView: View {
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 16) {
-                        ForEach(shelf.books) { book in
+                        ForEach(sortedBooks) { book in
                             BookCardView(book: book) {
                                 onBookTap(book)
                             }
@@ -210,7 +276,7 @@ struct BookCardView: View {
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 8) {
-                bookCoverImage
+                BookCoverImage(imageData: book.coverImageData, title: book.title, size: .medium)
                     .frame(width: 100, height: 150)
                     .cornerRadius(8)
                     .shadow(radius: 2)
@@ -231,33 +297,9 @@ struct BookCardView: View {
             }
         }
         .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private var bookCoverImage: some View {
-        if let imageData = book.coverImageData,
-           let uiImage = UIImage(data: imageData) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .clipped()
-        } else {
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .overlay {
-                    VStack {
-                        Image(systemName: "book.closed.fill")
-                            .font(.title2)
-                            .foregroundColor(.gray)
-                        Text(book.title)
-                            .font(.caption2)
-                            .foregroundColor(.gray)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 4)
-                    }
-                }
-        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title) by \(book.author)")
+        .accessibilityHint("Double tap to view details")
     }
 }
 

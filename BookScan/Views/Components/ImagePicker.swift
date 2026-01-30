@@ -7,6 +7,9 @@
 
 import SwiftUI
 import PhotosUI
+import os.log
+
+private let logger = Logger(subsystem: "com.bookscan", category: "ImagePicker")
 
 struct ImagePicker: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
@@ -99,13 +102,24 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
 
             guard let provider = results.first?.itemProvider,
                   provider.canLoadObject(ofClass: UIImage.self) else {
+                logger.debug("No image selected or provider cannot load UIImage")
                 return
             }
 
-            provider.loadObject(ofClass: UIImage.self) { [weak self] image, _ in
+            // Capture parent reference before async operation to avoid weak self issues
+            let parentRef = parent
+
+            provider.loadObject(ofClass: UIImage.self) { image, error in
+                if let error = error {
+                    logger.error("Failed to load image from photo library: \(error.localizedDescription)")
+                    return
+                }
+
                 DispatchQueue.main.async {
                     if let uiImage = image as? UIImage {
-                        self?.parent.selectedImage = self?.resizeImage(uiImage, maxDimension: 500)
+                        parentRef.selectedImage = self.resizeImage(uiImage, maxDimension: 500)
+                    } else {
+                        logger.warning("Loaded object was not a UIImage")
                     }
                 }
             }

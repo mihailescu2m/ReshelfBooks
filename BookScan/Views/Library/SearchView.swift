@@ -7,22 +7,27 @@
 
 import SwiftUI
 import SwiftData
+import Combine
 
 struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
     @Query private var books: [Book]
     @Query(sort: \Shelf.sortOrder) private var shelves: [Shelf]
 
     @State private var searchText = ""
+    @State private var debouncedSearchText = ""
+    @State private var searchTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
+
+    // Debounce delay in milliseconds
+    private let debounceDelay: UInt64 = 300_000_000 // 300ms in nanoseconds
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 searchBar
 
-                if searchText.isEmpty {
+                if debouncedSearchText.isEmpty {
                     emptySearchView
                 } else if filteredBooks.isEmpty {
                     noResultsView
@@ -42,8 +47,46 @@ struct SearchView: View {
             .onAppear {
                 isSearchFocused = true
             }
+            .onChange(of: searchText) { _, newValue in
+                debounceSearch(newValue)
+            }
         }
     }
+
+    // MARK: - Debounced Search
+
+    private func debounceSearch(_ query: String) {
+        // Cancel any existing search task
+        searchTask?.cancel()
+
+        // If empty, update immediately
+        if query.isEmpty {
+            debouncedSearchText = ""
+            return
+        }
+
+        // Capture the query value to compare after sleep
+        let capturedQuery = query
+
+        // Create new debounced task
+        searchTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: debounceDelay)
+
+                // Double-check: only update if the query hasn't changed
+                // and the task wasn't cancelled
+                guard !Task.isCancelled, searchText == capturedQuery else {
+                    return
+                }
+
+                debouncedSearchText = capturedQuery
+            } catch {
+                // Task was cancelled, ignore
+            }
+        }
+    }
+
+    // MARK: - Search Bar
 
     private var searchBar: some View {
         HStack(spacing: 12) {
@@ -55,14 +98,18 @@ struct SearchView: View {
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
                     .focused($isSearchFocused)
+                    .accessibilityLabel("Search field")
+                    .accessibilityHint("Enter title, author, or ISBN to search")
 
                 if !searchText.isEmpty {
                     Button {
                         searchText = ""
+                        debouncedSearchText = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(.secondary)
                     }
+                    .accessibilityLabel("Clear search")
                 }
             }
             .padding(12)
@@ -72,16 +119,20 @@ struct SearchView: View {
         .padding()
     }
 
+    // MARK: - Filtered Results
+
     private var filteredBooks: [Book] {
-        let query = searchText.lowercased().trimmingCharacters(in: .whitespaces)
+        let query = debouncedSearchText.lowercased().trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return [] }
 
         return books.filter { book in
             book.title.lowercased().contains(query) ||
             book.author.lowercased().contains(query) ||
             book.isbn.lowercased().contains(query)
-        }
+        }.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
+
+    // MARK: - Empty State Views
 
     private var emptySearchView: some View {
         VStack(spacing: 16) {
@@ -101,6 +152,8 @@ struct SearchView: View {
 
             Spacer()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Search your library by title, author, or ISBN")
     }
 
     private var noResultsView: some View {
@@ -115,7 +168,7 @@ struct SearchView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("No books found matching \"\(searchText)\"")
+            Text("No books found matching \"\(debouncedSearchText)\"")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -123,7 +176,11 @@ struct SearchView: View {
             Spacer()
         }
         .padding()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("No results found for \(debouncedSearchText)")
     }
+
+    // MARK: - Results List
 
     private var searchResultsList: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -149,12 +206,14 @@ struct SearchView: View {
     }
 }
 
+// MARK: - Search Result Row
+
 struct SearchResultRow: View {
     let book: Book
 
     var body: some View {
         HStack(spacing: 16) {
-            bookCoverImage
+            BookCoverImage(imageData: book.coverImageData, title: book.title, size: .small)
                 .frame(width: 60, height: 90)
                 .cornerRadius(6)
                 .shadow(radius: 2)
@@ -190,293 +249,26 @@ struct SearchResultRow: View {
         .padding()
         .background(Color(.secondarySystemBackground))
         .cornerRadius(12)
-    }
-
-    @ViewBuilder
-    private var bookCoverImage: some View {
-        if let imageData = book.coverImageData,
-           let uiImage = UIImage(data: imageData) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .clipped()
-        } else {
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .overlay {
-                    Image(systemName: "book.closed.fill")
-                        .font(.title3)
-                        .foregroundColor(.gray)
-                }
-        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title) by \(book.author), on shelf \(book.shelf?.name ?? "Unshelved")")
+        .accessibilityHint("Double tap to view details")
     }
 }
 
-// MARK: - Book Detail View for Search (inline, no sheet)
+// MARK: - Search Book Detail View (inline navigation)
 
 struct SearchBookDetailView: View {
-    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
 
     @Bindable var book: Book
     let shelves: [Shelf]
 
-    @State private var showingDeleteConfirmation = false
-    @State private var showingNewShelfAlert = false
-    @State private var newShelfName = ""
-    @State private var showingImageSourcePicker = false
-    @State private var showingCamera = false
-    @State private var showingPhotoLibrary = false
-    @State private var selectedImage: UIImage?
-
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                bookCoverSection
-
-                bookInfoSection
-
-                shelfSelectionSection
-
-                deleteSection
-            }
-            .padding()
+        BookDetailContent(book: book, shelves: shelves) {
+            dismiss()
         }
         .navigationTitle("Book Details")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("New Shelf", isPresented: $showingNewShelfAlert) {
-            TextField("Shelf name", text: $newShelfName)
-            Button("Cancel", role: .cancel) {
-                newShelfName = ""
-            }
-            Button("Create") {
-                createNewShelf()
-            }
-        } message: {
-            Text("Enter a name for the new shelf")
-        }
-        .confirmationDialog(
-            "Delete Book",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
-                deleteBook()
-            }
-        } message: {
-            Text("This action cannot be undone.")
-        }
-        .confirmationDialog(
-            "Change Cover Image",
-            isPresented: $showingImageSourcePicker,
-            titleVisibility: .visible
-        ) {
-            Button("Take Photo") {
-                showingCamera = true
-            }
-            Button("Choose from Library") {
-                showingPhotoLibrary = true
-            }
-            if book.coverImageData != nil {
-                Button("Remove Cover", role: .destructive) {
-                    book.coverImageData = nil
-                }
-            }
-        }
-        .sheet(isPresented: $showingCamera) {
-            ImagePicker(selectedImage: $selectedImage, sourceType: .camera)
-                .ignoresSafeArea()
-        }
-        .sheet(isPresented: $showingPhotoLibrary) {
-            PhotoLibraryPicker(selectedImage: $selectedImage)
-        }
-        .onChange(of: selectedImage) { _, newImage in
-            if let image = newImage {
-                book.coverImageData = image.jpegData(compressionQuality: 0.8)
-                selectedImage = nil
-            }
-        }
-    }
-
-    private var bookCoverSection: some View {
-        VStack(spacing: 12) {
-            ZStack(alignment: .bottomTrailing) {
-                bookCoverImage
-                    .frame(width: 150, height: 225)
-                    .cornerRadius(12)
-                    .shadow(radius: 8)
-
-                Button {
-                    showingImageSourcePicker = true
-                } label: {
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(10)
-                        .background(Color.accentColor)
-                        .clipShape(Circle())
-                        .shadow(radius: 4)
-                }
-                .offset(x: 8, y: 8)
-            }
-
-            Text("Tap camera to change cover")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var bookCoverImage: some View {
-        if let imageData = book.coverImageData,
-           let uiImage = UIImage(data: imageData) {
-            Image(uiImage: uiImage)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .clipped()
-        } else {
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .overlay {
-                    VStack {
-                        Image(systemName: "book.closed.fill")
-                            .font(.largeTitle)
-                            .foregroundColor(.gray)
-                        Text(book.title)
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 8)
-                    }
-                }
-        }
-    }
-
-    private var bookInfoSection: some View {
-        VStack(spacing: 16) {
-            Text(book.title)
-                .font(.title2)
-                .fontWeight(.bold)
-                .multilineTextAlignment(.center)
-
-            VStack(spacing: 8) {
-                infoRow(label: "Author", value: book.author)
-                infoRow(label: "Year", value: book.yearPublished)
-                infoRow(label: "ISBN", value: book.isbn)
-                infoRow(label: "Added", value: book.dateAdded.formatted(date: .abbreviated, time: .omitted))
-            }
-        }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
-    }
-
-    private func infoRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .foregroundColor(.secondary)
-            Spacer()
-            Text(value)
-                .fontWeight(.medium)
-        }
-    }
-
-    private var shelfSelectionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "books.vertical.fill")
-                    .foregroundColor(.accentColor)
-                Text("Shelf Assignment")
-                    .font(.headline)
-                Spacer()
-
-                Button {
-                    showingNewShelfAlert = true
-                } label: {
-                    Label("New Shelf", systemImage: "plus")
-                        .font(.subheadline)
-                }
-            }
-
-            if shelves.isEmpty {
-                Text("No shelves available. Create one to organize this book.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color(.tertiarySystemBackground))
-                    .cornerRadius(8)
-            } else {
-                VStack(spacing: 8) {
-                    shelfOption(nil, label: "Unshelved")
-
-                    ForEach(shelves) { shelf in
-                        shelfOption(shelf, label: shelf.name)
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
-    }
-
-    private func shelfOption(_ shelf: Shelf?, label: String) -> some View {
-        Button {
-            withAnimation {
-                book.shelf = shelf
-            }
-        } label: {
-            HStack {
-                Image(systemName: book.shelf == shelf ? "checkmark.circle.fill" : "circle")
-                    .foregroundColor(book.shelf == shelf ? .accentColor : .secondary)
-                Text(label)
-                    .foregroundColor(.primary)
-                Spacer()
-                if let shelf = shelf {
-                    Text("\(shelf.books.count) books")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding()
-            .background(book.shelf == shelf ? Color.accentColor.opacity(0.1) : Color(.tertiarySystemBackground))
-            .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(book.shelf == shelf ? Color.accentColor : Color.clear, lineWidth: 2)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var deleteSection: some View {
-        Button(role: .destructive) {
-            showingDeleteConfirmation = true
-        } label: {
-            HStack {
-                Image(systemName: "trash")
-                Text("Delete Book")
-            }
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.red.opacity(0.1))
-            .foregroundColor(.red)
-            .cornerRadius(12)
-        }
-    }
-
-    private func createNewShelf() {
-        guard !newShelfName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-
-        let shelf = Shelf(name: newShelfName, sortOrder: shelves.count)
-        modelContext.insert(shelf)
-        book.shelf = shelf
-        newShelfName = ""
-    }
-
-    private func deleteBook() {
-        modelContext.delete(book)
     }
 }
 

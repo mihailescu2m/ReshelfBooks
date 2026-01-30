@@ -9,7 +9,7 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @State private var selectedTab = 0
+    @State private var selectedTab = 1
     @State private var showingSearch = false
 
     var body: some View {
@@ -52,9 +52,9 @@ struct ContentView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.primary)
-                    .frame(width: 50, height: 50)
+                    .padding(22)
                     .background(.ultraThinMaterial)
-                    .cornerRadius(25)
+                    .clipShape(Circle())
                     .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
             }
         }

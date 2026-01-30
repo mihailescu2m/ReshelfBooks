@@ -7,6 +7,24 @@
 
 import SwiftUI
 import SwiftData
+import os.log
+
+private let logger = Logger(subsystem: "com.bookscan", category: "Scanner")
+
+// Enum to represent scan result for sheet presentation
+enum ScanResult: Identifiable {
+    case existingBook(Book, wasReturned: Bool)
+    case newBook(BookMetadata)
+
+    var id: String {
+        switch self {
+        case .existingBook(let book, _):
+            return "existing-\(book.isbn)"
+        case .newBook(let metadata):
+            return "new-\(metadata.isbn)"
+        }
+    }
+}
 
 struct ScannerTabView: View {
     @Environment(\.modelContext) private var modelContext
@@ -15,9 +33,7 @@ struct ScannerTabView: View {
 
     @State private var scannedCode: String?
     @State private var isScanning = true
-    @State private var showingResult = false
-    @State private var existingBook: Book?
-    @State private var newBookMetadata: BookMetadata?
+    @State private var scanResult: ScanResult?
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showingManualEntry = false
@@ -60,21 +76,22 @@ struct ScannerTabView: View {
                     handleScannedCode(code)
                 }
             }
-            .sheet(isPresented: $showingResult) {
+            .sheet(item: $scanResult, onDismiss: {
                 resetScanner()
-            } content: {
-                if let book = existingBook {
-                    ExistingBookView(book: book, onManualEntry: {
-                        showingResult = false
+            }) { result in
+                switch result {
+                case .existingBook(let book, let wasReturned):
+                    ExistingBookView(book: book, wasReturned: wasReturned, onManualEntry: {
+                        scanResult = nil
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             showingManualEntry = true
                         }
                     })
-                } else if let metadata = newBookMetadata {
+                case .newBook(let metadata):
                     NewBookView(metadata: metadata, shelves: shelves, onSave: { shelf in
                         saveNewBook(metadata: metadata, shelf: shelf)
                     }, onManualEntry: {
-                        showingResult = false
+                        scanResult = nil
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             showingManualEntry = true
                         }
@@ -155,8 +172,13 @@ struct ScannerTabView: View {
 
     private func handleScannedCode(_ code: String) {
         if let book = books.first(where: { $0.isbn == code }) {
-            existingBook = book
-            showingResult = true
+            // Check if book is currently lent and auto-return it
+            if book.isLent {
+                book.returnBook()
+                scanResult = .existingBook(book, wasReturned: true)
+            } else {
+                scanResult = .existingBook(book, wasReturned: false)
+            }
         } else {
             lookupBook(isbn: code)
         }
@@ -170,9 +192,8 @@ struct ScannerTabView: View {
             do {
                 let metadata = try await ISBNLookupService.shared.lookupBook(isbn: isbn)
                 await MainActor.run {
-                    newBookMetadata = metadata
                     isLoading = false
-                    showingResult = true
+                    scanResult = .newBook(metadata)
                 }
             } catch {
                 await MainActor.run {
@@ -197,22 +218,26 @@ struct ScannerTabView: View {
 
         if let coverURL = metadata.coverImageURL {
             Task {
-                if let imageData = try? await ISBNLookupService.shared.downloadCoverImage(from: coverURL) {
+                do {
+                    let imageData = try await ISBNLookupService.shared.downloadCoverImage(from: coverURL)
                     await MainActor.run {
                         book.coverImageData = imageData
                     }
+                    logger.info("Successfully downloaded cover image for ISBN \(metadata.isbn)")
+                } catch {
+                    // Log the error but don't fail - book is still saved, just without cover
+                    logger.warning("Failed to download cover image for ISBN \(metadata.isbn): \(error.localizedDescription)")
                 }
             }
         }
 
         modelContext.insert(book)
-        showingResult = false
+        scanResult = nil
     }
 
     private func resetScanner() {
         scannedCode = nil
-        existingBook = nil
-        newBookMetadata = nil
+        scanResult = nil
         errorMessage = nil
         isScanning = true
     }
