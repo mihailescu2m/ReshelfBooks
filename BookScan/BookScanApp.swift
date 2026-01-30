@@ -24,35 +24,31 @@ struct BookScanApp: App {
             Shelf.self,
         ])
 
-        // Configure CloudKit sync for multi-device support
+        // Try local storage first (CloudKit requires entitlements to be configured in Xcode)
+        // To enable CloudKit sync:
+        // 1. In Xcode: Signing & Capabilities → + Capability → iCloud → CloudKit
+        // 2. Select or create container: iCloud.memeka.BookScan
+        // 3. Change cloudKitDatabase below from .none to .private("iCloud.memeka.BookScan")
         let modelConfiguration = ModelConfiguration(
             schema: schema,
             isStoredInMemoryOnly: false,
-            cloudKitDatabase: .private("iCloud.memeka.BookScan")
+            cloudKitDatabase: .none  // Change to .private("iCloud.memeka.BookScan") after enabling iCloud capability
         )
 
         do {
             sharedModelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
-            logger.info("ModelContainer created with CloudKit sync enabled")
+            logger.info("ModelContainer created successfully")
         } catch {
             // Log the error for debugging
-            logger.critical("Failed to create ModelContainer with CloudKit: \(error.localizedDescription)")
+            logger.critical("Failed to create ModelContainer: \(error.localizedDescription)")
 
-            // Try without CloudKit as fallback
-            let localConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            // Create an in-memory container as fallback so the app can at least launch
+            let fallbackConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             do {
-                sharedModelContainer = try ModelContainer(for: schema, configurations: [localConfig])
-                logger.warning("ModelContainer created without CloudKit sync (local only)")
+                sharedModelContainer = try ModelContainer(for: schema, configurations: [fallbackConfig])
+                logger.warning("ModelContainer created in-memory only (data will not persist)")
             } catch {
-                // Create an in-memory container as last resort
-                logger.critical("Failed to create local ModelContainer: \(error.localizedDescription)")
-                let fallbackConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-                do {
-                    sharedModelContainer = try ModelContainer(for: schema, configurations: [fallbackConfig])
-                    logger.warning("ModelContainer created in-memory only (data will not persist)")
-                } catch {
-                    fatalError("Could not create fallback ModelContainer: \(error)")
-                }
+                fatalError("Could not create fallback ModelContainer: \(error)")
             }
         }
     }
