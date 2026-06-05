@@ -52,30 +52,52 @@ struct BookScanApp: App {
         WindowGroup {
             ContentView()
                 .onAppear {
-                    createLendingShelfIfNeeded()
+                    ensureSingleLendingShelf()
                 }
         }
         .modelContainer(sharedModelContainer)
     }
 
-    /// Creates the special "Lent" shelf if it doesn't already exist
-    private func createLendingShelfIfNeeded() {
+    /// Ensures exactly one "Lent" shelf exists.
+    ///
+    /// CloudKit-backed stores can't use `#Unique` constraints, so two devices (or a
+    /// first launch racing the initial sync) can each create a lending shelf. When
+    /// duplicates appear we merge them into the earliest-created shelf rather than
+    /// leaving books split across copies.
+    private func ensureSingleLendingShelf() {
         let context = sharedModelContainer.mainContext
-
-        // Check if lending shelf already exists
         let descriptor = FetchDescriptor<Shelf>(predicate: #Predicate { $0.isLendingShelf == true })
 
         do {
-            let existingLendingShelves = try context.fetch(descriptor)
-            if existingLendingShelves.isEmpty {
-                // Create the lending shelf
+            let lendingShelves = try context.fetch(descriptor)
+
+            // None yet — create the canonical lending shelf.
+            guard let canonical = lendingShelves.min(by: { $0.dateCreated < $1.dateCreated }) else {
                 let lendingShelf = Shelf(name: "Lent", sortOrder: Int.max, isLendingShelf: true)
                 context.insert(lendingShelf)
                 try context.save()
                 logger.info("Created lending shelf")
+                return
             }
+
+            // Exactly one — nothing to do.
+            guard lendingShelves.count > 1 else { return }
+
+            // Merge duplicates: move their books onto the canonical shelf, then delete.
+            let duplicates = lendingShelves.filter { $0 !== canonical }
+            for duplicate in duplicates {
+                for book in duplicate.books ?? [] {
+                    book.shelf = canonical
+                }
+                for book in duplicate.previousBooks ?? [] {
+                    book.previousShelf = canonical
+                }
+                context.delete(duplicate)
+            }
+            try context.save()
+            logger.warning("Merged \(duplicates.count) duplicate lending shelf(es) into one")
         } catch {
-            logger.error("Error checking/creating lending shelf: \(error.localizedDescription)")
+            logger.error("Error ensuring lending shelf: \(error.localizedDescription)")
         }
     }
 }

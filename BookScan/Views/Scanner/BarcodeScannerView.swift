@@ -57,13 +57,19 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
     private var borderView: UIView?
     private var metadataOutput: AVCaptureMetadataOutput?
 
-    // Thread-safe session state
+    // Session running state — only ever read/written on sessionQueue.
     private let sessionQueue = DispatchQueue(label: "com.bookscan.sessionQueue")
-    private var _isSessionRunning = false
-    private var isSessionRunning: Bool {
-        get { sessionQueue.sync { _isSessionRunning } }
-        set { sessionQueue.sync { _isSessionRunning = newValue } }
-    }
+    private var isSessionRunning = false
+
+    // Whether the view wants the session running. Read/written on the main thread.
+    // The session may be requested before it finishes setting up (e.g. while the
+    // camera permission prompt is still pending), so setup consults this flag.
+    private var shouldBeScanning = true
+
+    // Guards against delivering more than one code per scan: the session keeps
+    // feeding frames for a moment after stopScanning() (it stops asynchronously),
+    // so the delegate can fire again before it actually halts. Main-thread only.
+    private var hasDeliveredCode = false
 
     // Haptic feedback generator
     private let feedbackGenerator = UINotificationFeedbackGenerator()
@@ -185,8 +191,11 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
 
     private func setupCaptureSession() {
         let session = AVCaptureSession()
+        
+        let position: AVCaptureDevice.Position =
+            UIDevice.current.userInterfaceIdiom == .pad ? .front : .back
 
-        guard let videoCaptureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) else {
+        guard let videoCaptureDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
             showNoCameraAlert()
             return
         }
@@ -210,7 +219,8 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
         if session.canAddOutput(metadataOutput) {
             session.addOutput(metadataOutput)
             metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
-            metadataOutput.metadataObjectTypes = [.ean13, .ean8]
+            // Book ISBNs are encoded as Bookland EAN-13 barcodes.
+            metadataOutput.metadataObjectTypes = [.ean13]
             self.metadataOutput = metadataOutput
         } else {
             showSetupErrorAlert(message: "Could not add metadata output to capture session.")
@@ -226,6 +236,11 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
         self.captureSession = session
 
         addScanOverlay()
+
+        // Setup may finish after updateUIViewController already asked us to start
+        // (notably on the first launch, once the permission prompt is answered),
+        // so kick off scanning here if it's still wanted.
+        startSessionIfPossible()
     }
 
     // MARK: - Scan Overlay
@@ -318,31 +333,50 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
     // MARK: - Scanning Control
 
     func startScanning() {
-        guard let session = captureSession, !isSessionRunning else { return }
-
-        sessionQueue.async { [weak self] in
-            session.startRunning()
-            self?._isSessionRunning = true
-        }
+        shouldBeScanning = true
+        // A fresh scan may begin; allow the next code to be delivered.
+        hasDeliveredCode = false
+        startSessionIfPossible()
     }
 
     func stopScanning() {
-        guard let session = captureSession, isSessionRunning else { return }
+        shouldBeScanning = false
+        guard let session = captureSession else { return }
 
         sessionQueue.async { [weak self] in
+            guard let self, self.isSessionRunning else { return }
             session.stopRunning()
-            self?._isSessionRunning = false
+            self.isSessionRunning = false
+        }
+    }
+
+    /// Starts the session if scanning is wanted and the session is ready.
+    /// Safe to call from setup completion or from `startScanning()`.
+    private func startSessionIfPossible() {
+        guard shouldBeScanning, let session = captureSession else { return }
+
+        // Check-and-set atomically on the session queue to avoid a TOCTOU race
+        // when start/stop are called in quick succession.
+        sessionQueue.async { [weak self] in
+            guard let self, !self.isSessionRunning else { return }
+            session.startRunning()
+            self.isSessionRunning = true
         }
     }
 
     // MARK: - AVCaptureMetadataOutputObjectsDelegate
 
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
+        // Only deliver one code per scan (delegate queue is main, so this is safe).
+        guard !hasDeliveredCode else { return }
+
         guard let metadataObject = metadataObjects.first,
               let readableObject = metadataObject as? AVMetadataMachineReadableCodeObject,
               let stringValue = readableObject.stringValue else {
             return
         }
+
+        hasDeliveredCode = true
 
         // Use modern haptic feedback
         feedbackGenerator.notificationOccurred(.success)

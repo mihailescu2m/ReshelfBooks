@@ -11,10 +11,12 @@ import os.log
 
 private let logger = Logger(subsystem: "com.bookscan", category: "Scanner")
 
-// Enum to represent scan result for sheet presentation
-enum ScanResult: Identifiable {
+/// The sheets the scanner can present. A single enum drives one `.sheet(item:)`,
+/// so we never have two presentations competing during a transition.
+enum ScannerSheet: Identifiable {
     case existingBook(Book, wasReturned: Bool)
     case newBook(BookMetadata)
+    case manualEntry(initialISBN: String?)
 
     var id: String {
         switch self {
@@ -22,8 +24,18 @@ enum ScanResult: Identifiable {
             return "existing-\(book.isbn)"
         case .newBook(let metadata):
             return "new-\(metadata.isbn)"
+        case .manualEntry:
+            return "manual"
         }
     }
+}
+
+/// Work to run once the current sheet has fully dismissed. SwiftUI can't swap one
+/// sheet for another in place, so we stash the follow-up and perform it in
+/// `onDismiss`, which avoids the timing hacks the old two-sheet design needed.
+private enum PendingScannerAction {
+    case present(ScannerSheet)
+    case lookup(String)
 }
 
 struct ScannerTabView: View {
@@ -33,10 +45,11 @@ struct ScannerTabView: View {
 
     @State private var scannedCode: String?
     @State private var isScanning = true
-    @State private var scanResult: ScanResult?
+    @State private var activeSheet: ScannerSheet?
+    @State private var pendingAction: PendingScannerAction?
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var showingManualEntry = false
+    @State private var lookupTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -71,45 +84,37 @@ struct ScannerTabView: View {
                     .disabled(isScanning && !isLoading)
                 }
             }
-            .onChange(of: scannedCode) { oldValue, newValue in
+            .onChange(of: scannedCode) { _, newValue in
                 if let code = newValue {
                     handleScannedCode(code)
                 }
             }
-            .sheet(item: $scanResult, onDismiss: {
-                resetScanner()
-            }) { result in
-                switch result {
-                case .existingBook(let book, let wasReturned):
-                    ExistingBookView(book: book, wasReturned: wasReturned, onManualEntry: {
-                        scanResult = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            showingManualEntry = true
-                        }
-                    })
-                case .newBook(let metadata):
-                    NewBookView(metadata: metadata, shelves: shelves, onSave: { shelf in
-                        saveNewBook(metadata: metadata, shelf: shelf)
-                    }, onManualEntry: {
-                        scanResult = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            showingManualEntry = true
-                        }
-                    })
-                }
+            .sheet(item: $activeSheet, onDismiss: handleSheetDismiss) { sheet in
+                sheetContent(for: sheet)
             }
-            .sheet(isPresented: $showingManualEntry) {
-                resetScanner()
-            } content: {
-                ManualISBNEntryView(
-                    initialISBN: scannedCode,
-                    onLookup: { isbn in
-                        showingManualEntry = false
-                        scannedCode = isbn
-                        handleScannedCode(isbn)
-                    }
-                )
-            }
+        }
+    }
+
+    @ViewBuilder
+    private func sheetContent(for sheet: ScannerSheet) -> some View {
+        switch sheet {
+        case .existingBook(let book, let wasReturned):
+            ExistingBookView(book: book, wasReturned: wasReturned, onManualEntry: {
+                transition(to: .manualEntry(initialISBN: nil))
+            })
+        case .newBook(let metadata):
+            NewBookView(metadata: metadata, shelves: shelves, onSave: { shelf, coverImage in
+                saveNewBook(metadata: metadata, shelf: shelf, coverImage: coverImage)
+            }, onManualEntry: {
+                transition(to: .manualEntry(initialISBN: nil))
+            })
+        case .manualEntry(let initialISBN):
+            ManualISBNEntryView(initialISBN: initialISBN, onLookup: { isbn in
+                // Handle after this sheet is gone (see handleSheetDismiss), so the
+                // result sheet can present without colliding with the dismissal.
+                pendingAction = .lookup(isbn)
+                activeSheet = nil
+            })
         }
     }
 
@@ -155,7 +160,7 @@ struct ScannerTabView: View {
     private var enterISBNButton: some View {
         Button {
             isScanning = false
-            showingManualEntry = true
+            activeSheet = .manualEntry(initialISBN: scannedCode)
         } label: {
             HStack {
                 Image(systemName: "keyboard")
@@ -170,14 +175,37 @@ struct ScannerTabView: View {
         .padding(.top, 20)
     }
 
+    // MARK: - Sheet coordination
+
+    /// Dismisses the current sheet, then presents `sheet` once dismissal completes.
+    private func transition(to sheet: ScannerSheet) {
+        pendingAction = .present(sheet)
+        activeSheet = nil
+    }
+
+    private func handleSheetDismiss() {
+        switch pendingAction {
+        case .present(let sheet):
+            pendingAction = nil
+            activeSheet = sheet
+        case .lookup(let isbn):
+            pendingAction = nil
+            handleScannedCode(isbn)
+        case nil:
+            resetScanner()
+        }
+    }
+
+    // MARK: - Scan handling
+
     private func handleScannedCode(_ code: String) {
         if let book = books.first(where: { $0.isbn == code }) {
-            // Check if book is currently lent and auto-return it
+            // Scanning a lent book returns it (per the lending shelf's instructions).
             if book.isLent {
                 book.returnBook()
-                scanResult = .existingBook(book, wasReturned: true)
+                activeSheet = .existingBook(book, wasReturned: true)
             } else {
-                scanResult = .existingBook(book, wasReturned: false)
+                activeSheet = .existingBook(book, wasReturned: false)
             }
         } else {
             lookupBook(isbn: code)
@@ -188,14 +216,19 @@ struct ScannerTabView: View {
         isLoading = true
         errorMessage = nil
 
-        Task {
+        lookupTask?.cancel()
+        lookupTask = Task {
             do {
                 let metadata = try await ISBNLookupService.shared.lookupBook(isbn: isbn)
+                // If the user reset (or started another lookup) while we waited,
+                // don't present a stale result.
+                if Task.isCancelled { return }
                 await MainActor.run {
                     isLoading = false
-                    scanResult = .newBook(metadata)
+                    activeSheet = .newBook(metadata)
                 }
             } catch {
+                if Task.isCancelled { return }
                 await MainActor.run {
                     isLoading = false
                     errorMessage = error.localizedDescription
@@ -206,7 +239,7 @@ struct ScannerTabView: View {
         }
     }
 
-    private func saveNewBook(metadata: BookMetadata, shelf: Shelf?) {
+    private func saveNewBook(metadata: BookMetadata, shelf: Shelf?, coverImage: UIImage?) {
         let book = Book(
             isbn: metadata.isbn,
             title: metadata.title,
@@ -215,12 +248,23 @@ struct ScannerTabView: View {
             coverImageURL: metadata.coverImageURL,
             shelf: shelf
         )
+        modelContext.insert(book)
 
-        if let coverURL = metadata.coverImageURL {
+        if let coverImage {
+            // Reuse the image already downloaded for the preview — no second fetch.
+            book.coverImageData = coverImage.coverJPEGData()
+        } else if let coverURL = metadata.coverImageURL {
+            // Preview hadn't finished loading yet; fetch the cover now.
             Task {
                 do {
-                    let imageData = try await ISBNLookupService.shared.downloadCoverImage(from: coverURL)
+                    let rawData = try await ISBNLookupService.shared.downloadCoverImage(from: coverURL)
+                    guard let imageData = CoverImage.normalizedData(from: rawData) else {
+                        logger.warning("Downloaded cover for ISBN \(metadata.isbn) was not a valid image; skipping")
+                        return
+                    }
                     await MainActor.run {
+                        // The user may have deleted the book while the cover downloaded.
+                        guard !book.isDeleted else { return }
                         book.coverImageData = imageData
                     }
                     logger.info("Successfully downloaded cover image for ISBN \(metadata.isbn)")
@@ -230,15 +274,17 @@ struct ScannerTabView: View {
                 }
             }
         }
-
-        modelContext.insert(book)
-        scanResult = nil
+        // NewBookView dismisses itself, which runs resetScanner via handleSheetDismiss.
     }
 
     private func resetScanner() {
+        lookupTask?.cancel()
+        lookupTask = nil
         scannedCode = nil
-        scanResult = nil
+        activeSheet = nil
+        pendingAction = nil
         errorMessage = nil
+        isLoading = false
         isScanning = true
     }
 }

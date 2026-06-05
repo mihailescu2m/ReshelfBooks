@@ -12,16 +12,14 @@ struct ManualISBNEntryView: View {
 
     let initialISBN: String?
     let onLookup: (String) -> Void
-    let onBack: (() -> Void)?
 
     @State private var isbn: String = ""
     @State private var isValidISBN = false
     @FocusState private var isTextFieldFocused: Bool
 
-    init(initialISBN: String? = nil, onLookup: @escaping (String) -> Void, onBack: (() -> Void)? = nil) {
+    init(initialISBN: String? = nil, onLookup: @escaping (String) -> Void) {
         self.initialISBN = initialISBN
         self.onLookup = onLookup
-        self.onBack = onBack
     }
 
     var body: some View {
@@ -42,19 +40,8 @@ struct ManualISBNEntryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if let onBack = onBack {
-                        Button {
-                            onBack()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                Text("Back")
-                            }
-                        }
-                    } else {
-                        Button("Cancel") {
-                            dismiss()
-                        }
+                    Button("Cancel") {
+                        dismiss()
                     }
                 }
             }
@@ -141,9 +128,7 @@ struct ManualISBNEntryView: View {
 
     private var lookupButton: some View {
         Button {
-            let cleanISBN = isbn.replacingOccurrences(of: "-", with: "")
-                .replacingOccurrences(of: " ", with: "")
-            onLookup(cleanISBN)
+            onLookup(ISBNValidator.normalize(isbn))
         } label: {
             Text("Look Up Book")
                 .font(.headline)
@@ -157,29 +142,21 @@ struct ManualISBNEntryView: View {
     }
 
     private func validateISBN() {
-        let cleanISBN = isbn.replacingOccurrences(of: "-", with: "")
-            .replacingOccurrences(of: " ", with: "")
-
-        // ISBN-10 or ISBN-13
-        isValidISBN = (cleanISBN.count == 10 || cleanISBN.count == 13) &&
-                      cleanISBN.allSatisfy { $0.isNumber }
+        isValidISBN = ISBNValidator.isValid(isbn)
     }
 }
 
-#Preview("From Scanner") {
+#Preview("Empty") {
     ManualISBNEntryView(onLookup: { isbn in
         print("Looking up: \(isbn)")
     })
 }
 
-#Preview("From Wrong Book") {
+#Preview("With Initial ISBN") {
     ManualISBNEntryView(
         initialISBN: "9780141439518",
         onLookup: { isbn in
             print("Looking up: \(isbn)")
-        },
-        onBack: {
-            print("Going back")
         }
     )
 }

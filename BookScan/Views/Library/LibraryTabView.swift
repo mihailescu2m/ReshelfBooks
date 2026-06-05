@@ -14,7 +14,6 @@ struct LibraryTabView: View {
     @Query private var books: [Book]
 
     @State private var showingNewShelfAlert = false
-    @State private var newShelfName = ""
     @State private var selectedBook: Book?
     @State private var showingBookDetail = false
 
@@ -37,26 +36,17 @@ struct LibraryTabView: View {
                     }
                 }
             }
-            .alert("New Shelf", isPresented: $showingNewShelfAlert) {
-                TextField("Shelf name", text: $newShelfName)
-                Button("Cancel", role: .cancel) {
-                    newShelfName = ""
-                }
-                Button("Create") {
-                    createNewShelf()
-                }
-            } message: {
-                Text("Enter a name for the new shelf")
-            }
+            .newShelfAlert(isPresented: $showingNewShelfAlert, existingShelfCount: shelves.count)
             .sheet(item: $selectedBook) { book in
                 BookDetailView(book: book, shelves: shelves)
             }
         }
     }
 
-    /// Check if library is truly empty (excluding lending shelf)
+    /// Check if there is nothing to display anywhere: no regular shelves and no
+    /// books at all (lent books still render in the lending section, so they count).
     private var isLibraryEmpty: Bool {
-        shelves.regularShelves.isEmpty && books.filter { !$0.isLent }.isEmpty
+        shelves.regularShelves.isEmpty && books.isEmpty
     }
 
     private var emptyLibraryView: some View {
@@ -135,14 +125,6 @@ struct LibraryTabView: View {
                 }
             }
         }
-    }
-
-    private func createNewShelf() {
-        guard !newShelfName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-
-        let shelf = Shelf(name: newShelfName, sortOrder: shelves.count)
-        modelContext.insert(shelf)
-        newShelfName = ""
     }
 
     private func deleteShelf(_ shelf: Shelf) {

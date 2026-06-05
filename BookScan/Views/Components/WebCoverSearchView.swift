@@ -20,8 +20,10 @@ struct WebCoverSearchView: View {
 
     @State private var coverURLs: [String] = []
     @State private var loadedImages: [String: UIImage] = [:]
+    @State private var loadingURLs: Set<String> = []
     @State private var isSearching = true
     @State private var selectedURL: String?
+    @State private var hasSelected = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 16),
@@ -164,14 +166,17 @@ struct WebCoverSearchView: View {
     }
 
     private func loadImage(from url: String) async {
-        guard loadedImages[url] == nil else { return }
+        // Skip if already loaded or a download for this URL is already in flight.
+        // The guard + insert run synchronously on the main actor (no await between
+        // them), so two concurrent callers can't both start a download.
+        guard loadedImages[url] == nil, !loadingURLs.contains(url) else { return }
+        loadingURLs.insert(url)
+        defer { loadingURLs.remove(url) }
 
         do {
             let data = try await ISBNLookupService.shared.downloadCoverImage(from: url)
             if let image = UIImage(data: data) {
-                await MainActor.run {
-                    loadedImages[url] = image
-                }
+                loadedImages[url] = image
             }
         } catch {
             logger.debug("Failed to load cover image from \(url): \(error.localizedDescription)")
@@ -179,20 +184,27 @@ struct WebCoverSearchView: View {
     }
 
     private func selectCover(url: String) {
+        // Ignore further taps once a cover is being committed (prevents two
+        // selections both calling dismiss()).
+        guard !hasSelected else { return }
+        hasSelected = true
+
         if let image = loadedImages[url] {
             selectedImage = image
             dismiss()
         } else {
-            // Image not loaded yet, mark as selected and wait
+            // Image not loaded yet — show it as selected, load, then commit.
             selectedURL = url
 
             Task {
                 await loadImage(from: url)
                 if let image = loadedImages[url] {
-                    await MainActor.run {
-                        selectedImage = image
-                        dismiss()
-                    }
+                    selectedImage = image
+                    dismiss()
+                } else {
+                    // Load failed; allow the user to pick another cover.
+                    hasSelected = false
+                    selectedURL = nil
                 }
             }
         }

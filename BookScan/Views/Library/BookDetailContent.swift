@@ -22,7 +22,6 @@ struct BookDetailContent: View {
     @State private var showingNewShelfAlert = false
     @State private var showingLendConfirmation = false
     @State private var showingReturnConfirmation = false
-    @State private var newShelfName = ""
     @State private var showingImageSourcePicker = false
     @State private var showingCamera = false
     @State private var showingPhotoLibrary = false
@@ -48,16 +47,8 @@ struct BookDetailContent: View {
             }
             .padding()
         }
-        .alert("New Shelf", isPresented: $showingNewShelfAlert) {
-            TextField("Shelf name", text: $newShelfName)
-            Button("Cancel", role: .cancel) {
-                newShelfName = ""
-            }
-            Button("Create") {
-                createNewShelf()
-            }
-        } message: {
-            Text("Enter a name for the new shelf")
+        .newShelfAlert(isPresented: $showingNewShelfAlert, existingShelfCount: shelves.count) { newShelf in
+            book.shelf = newShelf
         }
         .confirmationDialog(
             "Delete Book",
@@ -129,7 +120,8 @@ struct BookDetailContent: View {
         }
         .onChange(of: selectedImage) { _, newImage in
             if let image = newImage {
-                book.coverImageData = image.jpegData(compressionQuality: 0.8)
+                // Size-cap + re-encode (web-search results arrive at full resolution).
+                book.coverImageData = image.coverJPEGData()
                 selectedImage = nil
             }
         }
@@ -210,15 +202,27 @@ struct BookDetailContent: View {
                     .font(.headline)
                 Spacer()
 
-                Button {
-                    showingNewShelfAlert = true
-                } label: {
-                    Label("New Shelf", systemImage: "plus")
-                        .font(.subheadline)
+                // Hide while lent — the shelf is fixed to "Lent" until the book is
+                // returned, so assigning a shelf here would leave stale state.
+                if !book.isLent {
+                    Button {
+                        showingNewShelfAlert = true
+                    } label: {
+                        Label("New Shelf", systemImage: "plus")
+                            .font(.subheadline)
+                    }
                 }
             }
 
-            if shelves.regularShelves.isEmpty {
+            if book.isLent {
+                Text("This book is lent. Use Return to move it back to its shelf.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color(.tertiarySystemBackground))
+                    .cornerRadius(8)
+            } else if shelves.regularShelves.isEmpty {
                 Text("No shelves available. Create one to organize this book.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -335,15 +339,6 @@ struct BookDetailContent: View {
     }
 
     // MARK: - Actions
-
-    private func createNewShelf() {
-        guard !newShelfName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-
-        let shelf = Shelf(name: newShelfName, sortOrder: shelves.count)
-        modelContext.insert(shelf)
-        book.shelf = shelf
-        newShelfName = ""
-    }
 
     private func deleteBook() {
         modelContext.delete(book)

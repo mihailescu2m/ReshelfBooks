@@ -39,9 +39,9 @@ struct ImagePicker: UIViewControllerRepresentable {
         func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
             // Prefer edited image (cropped), fall back to original
             if let editedImage = info[.editedImage] as? UIImage {
-                parent.selectedImage = resizeImage(editedImage, maxDimension: 500)
+                parent.selectedImage = editedImage.resized(maxDimension: CoverImage.maxDimension)
             } else if let originalImage = info[.originalImage] as? UIImage {
-                parent.selectedImage = resizeImage(originalImage, maxDimension: 500)
+                parent.selectedImage = originalImage.resized(maxDimension: CoverImage.maxDimension)
             }
 
             picker.dismiss(animated: true)
@@ -49,22 +49,6 @@ struct ImagePicker: UIViewControllerRepresentable {
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             picker.dismiss(animated: true)
-        }
-
-        private func resizeImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
-            let size = image.size
-
-            guard size.width > maxDimension || size.height > maxDimension else {
-                return image
-            }
-
-            let ratio = min(maxDimension / size.width, maxDimension / size.height)
-            let newSize = CGSize(width: size.width * ratio, height: size.height * ratio)
-
-            let renderer = UIGraphicsImageRenderer(size: newSize)
-            return renderer.image { _ in
-                image.draw(in: CGRect(origin: .zero, size: newSize))
-            }
         }
     }
 }
@@ -117,27 +101,11 @@ struct PhotoLibraryPicker: UIViewControllerRepresentable {
 
                 DispatchQueue.main.async {
                     if let uiImage = image as? UIImage {
-                        parentRef.selectedImage = self.resizeImage(uiImage, maxDimension: 500)
+                        parentRef.selectedImage = uiImage.resized(maxDimension: CoverImage.maxDimension)
                     } else {
                         logger.warning("Loaded object was not a UIImage")
                     }
                 }
-            }
-        }
-
-        private func resizeImage(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
-            let size = image.size
-
-            guard size.width > maxDimension || size.height > maxDimension else {
-                return image
-            }
-
-            let ratio = min(maxDimension / size.width, maxDimension / size.height)
-            let newSize = CGSize(width: size.width * ratio, height: size.height * ratio)
-
-            let renderer = UIGraphicsImageRenderer(size: newSize)
-            return renderer.image { _ in
-                image.draw(in: CGRect(origin: .zero, size: newSize))
             }
         }
     }

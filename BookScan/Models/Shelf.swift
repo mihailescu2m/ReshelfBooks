@@ -42,8 +42,10 @@ extension Array where Element == Shelf {
         filter { !$0.isLendingShelf }
     }
 
-    /// Returns the special lending shelf, if it exists
+    /// Returns the special lending shelf, if it exists.
+    /// If duplicates exist (e.g. a CloudKit sync race before dedup runs), the
+    /// earliest-created shelf is returned so the choice is stable everywhere.
     var lendingShelf: Shelf? {
-        first { $0.isLendingShelf }
+        filter { $0.isLendingShelf }.min { $0.dateCreated < $1.dateCreated }
     }
 }

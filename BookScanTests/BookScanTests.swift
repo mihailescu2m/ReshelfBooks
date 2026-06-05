@@ -8,6 +8,7 @@
 import Testing
 import SwiftData
 import Foundation
+import UIKit
 @testable import BookScan
 
 // MARK: - Book Model Tests
@@ -243,51 +244,121 @@ struct ShelfModelTests {
 @Suite("ISBN Validation Tests")
 struct ISBNValidationTests {
 
-    private func isValidISBN(_ isbn: String) -> Bool {
-        let cleanISBN = isbn.replacingOccurrences(of: "-", with: "")
-            .replacingOccurrences(of: " ", with: "")
-        return (cleanISBN.count == 10 || cleanISBN.count == 13) &&
-               cleanISBN.allSatisfy { $0.isNumber }
-    }
-
     @Test("Valid ISBN-13 without dashes")
     func validISBN13NoDashes() {
-        #expect(isValidISBN("9780141439518") == true)
+        #expect(ISBNValidator.isValid("9780141439518"))
     }
 
     @Test("Valid ISBN-13 with dashes")
     func validISBN13WithDashes() {
-        #expect(isValidISBN("978-0-14-143951-8") == true)
+        #expect(ISBNValidator.isValid("978-0-14-143951-8"))
     }
 
     @Test("Valid ISBN-10 without dashes")
     func validISBN10NoDashes() {
-        #expect(isValidISBN("0141439513") == true)
+        #expect(ISBNValidator.isValid("0141439513"))
     }
 
     @Test("Valid ISBN-10 with dashes")
     func validISBN10WithDashes() {
-        #expect(isValidISBN("0-14-143951-3") == true)
+        #expect(ISBNValidator.isValid("0-14-143951-3"))
+    }
+
+    @Test("Valid ISBN-10 with X check digit (any case)")
+    func validISBN10WithXCheckDigit() {
+        #expect(ISBNValidator.isValid("080442957X"))
+        #expect(ISBNValidator.isValid("080442957x"))
     }
 
     @Test("Invalid ISBN - too short")
     func invalidISBNTooShort() {
-        #expect(isValidISBN("12345") == false)
+        #expect(ISBNValidator.isValid("12345") == false)
     }
 
     @Test("Invalid ISBN - too long")
     func invalidISBNTooLong() {
-        #expect(isValidISBN("12345678901234") == false)
+        #expect(ISBNValidator.isValid("12345678901234") == false)
     }
 
     @Test("Invalid ISBN - contains letters")
     func invalidISBNWithLetters() {
-        #expect(isValidISBN("978014143951X") == false)
+        #expect(ISBNValidator.isValid("978014143951X") == false)
     }
 
     @Test("Empty ISBN is invalid")
     func emptyISBN() {
-        #expect(isValidISBN("") == false)
+        #expect(ISBNValidator.isValid("") == false)
+    }
+
+    @Test("ISBN-13 with wrong check digit is invalid")
+    func invalidISBN13Checksum() {
+        // Correct check digit is 8; 9 fails the checksum.
+        #expect(ISBNValidator.isValid("9780141439519") == false)
+    }
+
+    @Test("ISBN-10 with wrong check digit is invalid")
+    func invalidISBN10Checksum() {
+        // Correct check digit is 3; 2 fails the checksum.
+        #expect(ISBNValidator.isValid("0141439512") == false)
+    }
+
+    @Test("X outside the final position is invalid")
+    func invalidISBN10MisplacedX() {
+        #expect(ISBNValidator.isValid("01X1439513") == false)
+    }
+
+    @Test("normalize strips separators and uppercases")
+    func normalizeStripsSeparators() {
+        #expect(ISBNValidator.normalize("978-0-14 143951-8") == "9780141439518")
+        #expect(ISBNValidator.normalize("080442957x") == "080442957X")
+    }
+}
+
+// MARK: - Cover Image Tests
+
+@Suite("Cover Image Tests")
+struct CoverImageTests {
+
+    /// Builds a scale-1 JPEG of the given pixel size for deterministic assertions.
+    private func makeJPEG(width: CGFloat, height: CGFloat) -> Data {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format).image { ctx in
+            UIColor.systemBlue.setFill()
+            ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return image.jpegData(compressionQuality: 1.0)!
+    }
+
+    @Test("normalizedData returns nil for non-image bytes")
+    func rejectsNonImageData() {
+        let junk = Data("<html>404 Not Found</html>".utf8)
+        #expect(CoverImage.normalizedData(from: junk) == nil)
+    }
+
+    @Test("normalizedData re-encodes a valid image")
+    func acceptsValidImage() {
+        let raw = makeJPEG(width: 400, height: 600)
+        let normalized = CoverImage.normalizedData(from: raw)
+        #expect(normalized != nil)
+        #expect(UIImage(data: normalized!) != nil)
+    }
+
+    @Test("Oversized images are capped to the max dimension")
+    func capsOversizedImages() {
+        let raw = makeJPEG(width: 2000, height: 3000)
+        let normalized = CoverImage.normalizedData(from: raw)
+        let decoded = UIImage(data: normalized!)!
+        // Allow 1px slack for rounding during the resize.
+        #expect(max(decoded.size.width, decoded.size.height) <= CoverImage.maxDimension + 1)
+    }
+
+    @Test("Images already within bounds keep their size")
+    func leavesSmallImagesAlone() {
+        let raw = makeJPEG(width: 300, height: 450)
+        let decoded = UIImage(data: CoverImage.normalizedData(from: raw)!)!
+        #expect(decoded.size.width == 300)
+        #expect(decoded.size.height == 450)
     }
 }
 

@@ -51,7 +51,7 @@ actor ISBNLookupService {
 
     /// Main lookup function - tries Open Library first, then Google Books as fallback
     func lookupBook(isbn: String) async throws -> BookMetadata {
-        let cleanISBN = isbn.replacingOccurrences(of: "-", with: "")
+        let cleanISBN = ISBNValidator.normalize(isbn)
 
         // Try Open Library first
         if let result = try? await lookupFromOpenLibrary(isbn: cleanISBN) {
@@ -68,64 +68,31 @@ actor ISBNLookupService {
 
     /// Searches for book cover images from multiple sources and returns up to maxResults URLs
     func searchCoverImages(isbn: String, title: String, author: String, maxResults: Int = 6) async -> [String] {
+        // Kick off every source concurrently so the slow per-source network calls
+        // (including HEAD validation) overlap instead of running back-to-back.
+        async let openLibraryByISBN = getOpenLibraryCoverURL(isbn: isbn)
+        async let googleByISBN = searchGoogleBooks(query: "isbn:\(isbn)", maxResults: 1)
+        async let googleByTitleAuthor = searchGoogleBooks(query: "\(title) \(author)", maxResults: 2)
+        async let googleByTitle = searchGoogleBooks(query: title, maxResults: maxResults)
+        async let openLibraryBySearch = searchOpenLibrary(title: title, author: author, maxResults: maxResults)
+        async let bookcoverByISBN = getBookcoverAPIURL(isbn: isbn)
+        async let betterWorldByISBN = getBetterWorldBooksURL(isbn: isbn)
+
         var coverURLs: [String] = []
-
-        // 1. Try Open Library Covers API by ISBN
-        if let openLibraryCover = await getOpenLibraryCoverURL(isbn: isbn) {
-            coverURLs.append(openLibraryCover)
-        }
-
-        // 2. Try Google Books by ISBN
-        if let googleCover = await searchGoogleBooks(query: "isbn:\(isbn)", maxResults: 1).first {
-            if !coverURLs.contains(googleCover) {
-                coverURLs.append(googleCover)
+        func append(_ candidates: [String]) {
+            for url in candidates where !coverURLs.contains(url) {
+                coverURLs.append(url)
             }
         }
 
-        // 3. Try Google Books by title + author
-        if coverURLs.count < maxResults {
-            let titleAuthorCovers = await searchGoogleBooks(query: "\(title) \(author)", maxResults: 2)
-            for cover in titleAuthorCovers where !coverURLs.contains(cover) {
-                coverURLs.append(cover)
-                if coverURLs.count >= maxResults { break }
-            }
-        }
-
-        // 4. Try Google Books by title only (different editions)
-        if coverURLs.count < maxResults {
-            let titleCovers = await searchGoogleBooks(query: title, maxResults: maxResults - coverURLs.count + 2)
-            for cover in titleCovers where !coverURLs.contains(cover) {
-                coverURLs.append(cover)
-                if coverURLs.count >= maxResults { break }
-            }
-        }
-
-        // 5. Try Open Library search by title/author
-        if coverURLs.count < maxResults {
-            let openLibraryCovers = await searchOpenLibrary(title: title, author: author, maxResults: maxResults - coverURLs.count + 2)
-            for cover in openLibraryCovers where !coverURLs.contains(cover) {
-                coverURLs.append(cover)
-                if coverURLs.count >= maxResults { break }
-            }
-        }
-
-        // 6. Try Bookcover API by ISBN
-        if coverURLs.count < maxResults {
-            if let bookcoverURL = await getBookcoverAPIURL(isbn: isbn) {
-                if !coverURLs.contains(bookcoverURL) {
-                    coverURLs.append(bookcoverURL)
-                }
-            }
-        }
-
-        // 7. Try Better World Books by ISBN
-        if coverURLs.count < maxResults {
-            if let bwbURL = await getBetterWorldBooksURL(isbn: isbn) {
-                if !coverURLs.contains(bwbURL) {
-                    coverURLs.append(bwbURL)
-                }
-            }
-        }
+        // Assemble in priority order: ISBN matches first, then title/author, then broader fallbacks.
+        if let url = await openLibraryByISBN { append([url]) }
+        append(await googleByISBN)
+        append(await googleByTitleAuthor)
+        append(await googleByTitle)
+        append(await openLibraryBySearch)
+        if let url = await bookcoverByISBN { append([url]) }
+        if let url = await betterWorldByISBN { append([url]) }
 
         return Array(coverURLs.prefix(maxResults))
     }

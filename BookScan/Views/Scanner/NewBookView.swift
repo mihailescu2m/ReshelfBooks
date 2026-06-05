@@ -13,14 +13,15 @@ private let logger = Logger(subsystem: "com.bookscan", category: "NewBook")
 
 struct NewBookView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
 
     let metadata: BookMetadata
     let shelves: [Shelf]
-    let onSave: (Shelf?) -> Void
+    /// Receives the chosen shelf and the already-loaded cover image (if the
+    /// preview finished downloading), so the cover isn't fetched a second time.
+    let onSave: (Shelf?, UIImage?) -> Void
     let onManualEntry: (() -> Void)?
 
-    init(metadata: BookMetadata, shelves: [Shelf], onSave: @escaping (Shelf?) -> Void, onManualEntry: (() -> Void)? = nil) {
+    init(metadata: BookMetadata, shelves: [Shelf], onSave: @escaping (Shelf?, UIImage?) -> Void, onManualEntry: (() -> Void)? = nil) {
         self.metadata = metadata
         self.shelves = shelves
         self.onSave = onSave
@@ -29,7 +30,6 @@ struct NewBookView: View {
 
     @State private var selectedShelf: Shelf?
     @State private var showingNewShelfAlert = false
-    @State private var newShelfName = ""
     @State private var coverImage: UIImage?
     @State private var isLoadingImage = false
 
@@ -60,16 +60,8 @@ struct NewBookView: View {
                     }
                 }
             }
-            .alert("New Shelf", isPresented: $showingNewShelfAlert) {
-                TextField("Shelf name", text: $newShelfName)
-                Button("Cancel", role: .cancel) {
-                    newShelfName = ""
-                }
-                Button("Create") {
-                    createNewShelf()
-                }
-            } message: {
-                Text("Enter a name for the new shelf")
+            .newShelfAlert(isPresented: $showingNewShelfAlert, existingShelfCount: shelves.count) { newShelf in
+                selectedShelf = newShelf
             }
             .task {
                 await loadCoverImage()
@@ -211,7 +203,7 @@ struct NewBookView: View {
 
     private var saveButton: some View {
         Button {
-            onSave(selectedShelf)
+            onSave(selectedShelf, coverImage)
             dismiss()
         } label: {
             Text("Add to Library")
@@ -222,15 +214,6 @@ struct NewBookView: View {
                 .foregroundColor(.white)
                 .cornerRadius(12)
         }
-    }
-
-    private func createNewShelf() {
-        guard !newShelfName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-
-        let newShelf = Shelf(name: newShelfName, sortOrder: shelves.count)
-        modelContext.insert(newShelf)
-        selectedShelf = newShelf
-        newShelfName = ""
     }
 
     private func loadCoverImage() async {
@@ -261,6 +244,6 @@ struct NewBookView: View {
         coverImageURL: nil
     )
 
-    return NewBookView(metadata: metadata, shelves: []) { _ in }
+    return NewBookView(metadata: metadata, shelves: []) { _, _ in }
         .modelContainer(for: [Book.self, Shelf.self], inMemory: true)
 }
