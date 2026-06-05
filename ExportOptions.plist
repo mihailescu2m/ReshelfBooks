@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Store / TestFlight distribution -->
+    <key>method</key>
+    <string>app-store-connect</string>
+
+    <key>teamID</key>
+    <string>45CAZD64QH</string>
+
+    <!-- Upload the IPA directly to App Store Connect after export -->
+    <key>uploadToAppStoreConnect</key>
+    <true/>
+
+    <!-- Include dSYMs for crash symbolication in Xcode Organizer / TestFlight -->
+    <key>uploadSymbols</key>
+    <true/>
+
+    <!-- Let Xcode manage version/build from the project; don't override -->
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
+</dict>
+</plist>
