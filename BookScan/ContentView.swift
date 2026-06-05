@@ -16,7 +16,7 @@ struct ContentView: View {
         ZStack(alignment: .bottom) {
             // Tab content
             TabView(selection: $selectedTab) {
-                ScannerTabView()
+                ScannerTabView(isTabActive: selectedTab == 0)
                     .tag(0)
 
                 LibraryTabView()

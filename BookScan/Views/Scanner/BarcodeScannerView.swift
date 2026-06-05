@@ -61,10 +61,13 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
     private let sessionQueue = DispatchQueue(label: "com.bookscan.sessionQueue")
     private var isSessionRunning = false
 
-    // Whether the view wants the session running. Read/written on the main thread.
-    // The session may be requested before it finishes setting up (e.g. while the
-    // camera permission prompt is still pending), so setup consults this flag.
-    private var shouldBeScanning = true
+    // Whether the view wants the session running. Set by start/stopScanning (driven
+    // by updateUIViewController), read/written on the main thread. Defaults to false
+    // so setup never auto-starts the camera unless scanning has actually been
+    // requested — e.g. it stays off while the Scanner tab isn't visible. The session
+    // may be requested before setup finishes (e.g. during the permission prompt), so
+    // setup consults this flag once it's ready.
+    private var shouldBeScanning = false
 
     // Guards against delivering more than one code per scan: the session keeps
     // feeding frames for a moment after stopScanning() (it stops asynchronously),

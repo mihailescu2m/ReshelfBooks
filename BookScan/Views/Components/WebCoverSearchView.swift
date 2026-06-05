@@ -177,37 +177,44 @@ struct WebCoverSearchView: View {
             let data = try await ISBNLookupService.shared.downloadCoverImage(from: url)
             if let image = UIImage(data: data) {
                 loadedImages[url] = image
+                // If the user tapped this cover while it was still downloading,
+                // commit the selection now that the image is available.
+                if selectedURL == url {
+                    commitSelection(url)
+                }
             }
         } catch {
             logger.debug("Failed to load cover image from \(url): \(error.localizedDescription)")
+            // Clear the pending selection if this was the cover the user tapped.
+            if selectedURL == url {
+                selectedURL = nil
+            }
         }
     }
 
     private func selectCover(url: String) {
-        // Ignore further taps once a cover is being committed (prevents two
+        // Ignore further taps once a cover has been committed (prevents two
         // selections both calling dismiss()).
         guard !hasSelected else { return }
-        hasSelected = true
 
-        if let image = loadedImages[url] {
-            selectedImage = image
-            dismiss()
+        if loadedImages[url] != nil {
+            commitSelection(url)
         } else {
-            // Image not loaded yet — show it as selected, load, then commit.
+            // Not loaded yet — mark it selected and make sure a load is running.
+            // Whichever load finishes first (this one, or the cell's own .task)
+            // commits the selection, so tapping a still-downloading cover works
+            // instead of silently failing.
             selectedURL = url
-
-            Task {
-                await loadImage(from: url)
-                if let image = loadedImages[url] {
-                    selectedImage = image
-                    dismiss()
-                } else {
-                    // Load failed; allow the user to pick another cover.
-                    hasSelected = false
-                    selectedURL = nil
-                }
-            }
+            Task { await loadImage(from: url) }
         }
+    }
+
+    /// Commits the chosen cover once its image is available.
+    private func commitSelection(_ url: String) {
+        guard !hasSelected, let image = loadedImages[url] else { return }
+        hasSelected = true
+        selectedImage = image
+        dismiss()
     }
 }
 

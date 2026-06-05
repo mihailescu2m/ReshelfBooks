@@ -39,6 +39,10 @@ private enum PendingScannerAction {
 }
 
 struct ScannerTabView: View {
+    /// Whether the Scanner tab is currently visible. The camera only runs while
+    /// it is, so we don't hold the camera (and show the green indicator) on other tabs.
+    var isTabActive: Bool = true
+
     @Environment(\.modelContext) private var modelContext
     @Query private var books: [Book]
     @Query(sort: \Shelf.sortOrder) private var shelves: [Shelf]
@@ -54,8 +58,17 @@ struct ScannerTabView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                BarcodeScannerView(scannedCode: $scannedCode, isScanning: $isScanning)
-                    .ignoresSafeArea()
+                BarcodeScannerView(
+                    scannedCode: $scannedCode,
+                    // Effective camera state: only run when this tab is visible AND
+                    // we're in the scanning state. The setter preserves the scanner's
+                    // own writes (it sets false after finding a code).
+                    isScanning: Binding(
+                        get: { isTabActive && isScanning },
+                        set: { isScanning = $0 }
+                    )
+                )
+                .ignoresSafeArea()
 
                 if isLoading {
                     loadingOverlay
@@ -220,16 +233,17 @@ struct ScannerTabView: View {
         lookupTask = Task {
             do {
                 let metadata = try await ISBNLookupService.shared.lookupBook(isbn: isbn)
-                // If the user reset (or started another lookup) while we waited,
-                // don't present a stale result.
-                if Task.isCancelled { return }
                 await MainActor.run {
+                    // Re-check cancellation *inside* the hop: a reset that lands
+                    // between the await and this assignment must not resurrect a
+                    // stale result.
+                    guard !Task.isCancelled else { return }
                     isLoading = false
                     activeSheet = .newBook(metadata)
                 }
             } catch {
-                if Task.isCancelled { return }
                 await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     isLoading = false
                     errorMessage = error.localizedDescription
                     scannedCode = nil
