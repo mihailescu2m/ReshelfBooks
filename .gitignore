@@ -24,3 +24,12 @@ Package.resolved
 # Dependencies (not used today, ignored defensively)
 Pods/
 Carthage/Build/
+
+# Credentials — never commit secrets
+scripts/testflight_secrets.sh
+scripts/.env*
+.env
+.env.*
+*.p8
+*.p12
+*.mobileprovision

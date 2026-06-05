@@ -23,10 +23,21 @@
 
 set -euo pipefail
 
-# ── Configure these from App Store Connect → Users and Access → Keys ─────────
-ASC_KEY_ID=""        # e.g. "ABCDE12345"
-ASC_ISSUER_ID=""     # e.g. "12345678-1234-1234-1234-123456789012"
-ASC_KEY_PATH=""      # e.g. "$HOME/.appstoreconnect/private_keys/AuthKey_ABCDE12345.p8"
+# ── Credentials ───────────────────────────────────────────────────────────────
+# Option A (recommended): put your real values in scripts/testflight_secrets.sh
+#   (that file is gitignored — your keys never touch git history).
+# Option B: export ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH as shell env vars
+#   before running this script.
+SECRETS_FILE="$(dirname "$0")/testflight_secrets.sh"
+if [[ -f "$SECRETS_FILE" ]]; then
+    # shellcheck source=testflight_secrets.sh
+    source "$SECRETS_FILE"
+fi
+
+# Fallback placeholders (overridden by the secrets file or env).
+ASC_KEY_ID="${ASC_KEY_ID:-}"
+ASC_ISSUER_ID="${ASC_ISSUER_ID:-}"
+ASC_KEY_PATH="${ASC_KEY_PATH:-$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8}"
 # ─────────────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -64,7 +75,7 @@ xcodebuild archive \
     -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
     -allowProvisioningUpdates \
     -destination "generic/platform=iOS" \
-    | xcpretty 2>/dev/null || cat  # xcpretty is optional; falls back to raw output
+    2>&1 | tee /tmp/bookscan_archive.log | { xcpretty 2>/dev/null || cat; }
 echo "✅  Archive: $ARCHIVE_PATH"
 echo ""
 
