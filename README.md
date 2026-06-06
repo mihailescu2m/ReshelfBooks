@@ -170,10 +170,15 @@ Shelf ──< Book (previousShelf)   ← remembers original shelf while lent
 
 BookScan uses the following free, open APIs — no API keys required:
 
-- **[Open Library](https://openlibrary.org/developers/api)** — book metadata and cover images
-- **[Google Books API](https://developers.google.com/books)** — book metadata and cover images
-- **[Bookcover API](https://bookcover.longitood.com)** — cover images by ISBN
-- **[Better World Books](https://www.betterworldbooks.com)** — cover images by ISBN
+| Service | Used for |
+|---|---|
+| [Open Library](https://openlibrary.org/developers/api) | Book metadata + cover images by ISBN and title/author search |
+| [Google Books API](https://developers.google.com/books) | Book metadata + cover images (queried three ways: by ISBN, title+author, title) |
+| [WorldCat / OCLC](https://www.worldcat.org) | Cover images by ISBN — excellent coverage of academic, older, and non-English titles |
+| [Bookcover API](https://bookcover.longitood.com) | Cover images by ISBN |
+| [Better World Books](https://www.betterworldbooks.com) | Cover images by ISBN |
+
+All seven cover-image sources run **concurrently** and results are assembled in priority order, so the app shows the best available cover without waiting for slower sources.
 
 ---
 

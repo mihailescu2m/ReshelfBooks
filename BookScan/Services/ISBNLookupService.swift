@@ -77,6 +77,7 @@ actor ISBNLookupService {
         async let openLibraryBySearch = searchOpenLibrary(title: title, author: author, maxResults: maxResults)
         async let bookcoverByISBN = getBookcoverAPIURL(isbn: isbn)
         async let betterWorldByISBN = getBetterWorldBooksURL(isbn: isbn)
+        async let worldcatByISBN = getWorldCatCoverURL(isbn: isbn)
 
         var coverURLs: [String] = []
         func append(_ candidates: [String]) {
@@ -93,6 +94,7 @@ actor ISBNLookupService {
         append(await openLibraryBySearch)
         if let url = await bookcoverByISBN { append([url]) }
         if let url = await betterWorldByISBN { append([url]) }
+        if let url = await worldcatByISBN { append([url]) }
 
         return Array(coverURLs.prefix(maxResults))
     }
@@ -144,6 +146,11 @@ actor ISBNLookupService {
 
         // Try Google Books by title + author
         if let coverURL = await searchGoogleBooks(query: "\(title) \(author)", maxResults: 1).first {
+            return coverURL
+        }
+
+        // Try WorldCat (OCLC) by ISBN — good coverage for academic & non-English books
+        if let coverURL = await getWorldCatCoverURL(isbn: isbn) {
             return coverURL
         }
 
@@ -364,6 +371,23 @@ actor ISBNLookupService {
     /// Gets cover URL from Better World Books if valid
     private func getBetterWorldBooksURL(isbn: String) async -> String? {
         let coverURL = "https://images.betterworldbooks.com/isbn/\(isbn).jpg"
+
+        if await isValidImageURL(coverURL) {
+            return coverURL
+        }
+
+        return nil
+    }
+
+    // MARK: - WorldCat (OCLC)
+
+    /// Gets cover URL from WorldCat (OCLC) if valid.
+    ///
+    /// WorldCat is run by OCLC — the world's largest library cooperative — and has
+    /// particularly strong coverage of academic titles, older publications, and
+    /// non-English books that the other sources often miss. Free, no API key needed.
+    private func getWorldCatCoverURL(isbn: String) async -> String? {
+        let coverURL = "https://covers.worldcat.org/isbn/\(isbn)-L.jpg"
 
         if await isValidImageURL(coverURL) {
             return coverURL
