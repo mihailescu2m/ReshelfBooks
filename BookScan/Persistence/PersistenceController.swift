@@ -54,12 +54,17 @@ final class PersistenceController: ObservableObject {
 
     // MARK: - Init
 
+    /// UserDefaults key written by the toggle in the app's iOS Settings bundle.
+    private static let resetFlagKey = "reset_all_data"
+
     init(inMemory: Bool = false) {
         self.inMemory = inMemory
         container = NSPersistentCloudKitContainer(
             name: "BookScan",
             managedObjectModel: Self.makeManagedObjectModel()
         )
+        // Honor a "reset everything" request from iOS Settings BEFORE the stores load.
+        if !inMemory { eraseAllDataIfRequested() }
         configureStoreDescriptions()
         loadStores()
         configureViewContext()
@@ -131,6 +136,37 @@ final class PersistenceController: ObservableObject {
                 options: nil
             )
         }
+    }
+
+    /// Erases all local and (best-effort) CloudKit data when the user toggled the reset
+    /// switch in iOS Settings. Runs once, before the stores load, then clears the flag.
+    private func eraseAllDataIfRequested() {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: Self.resetFlagKey) else { return }
+        logger.warning("Reset requested from Settings — erasing all local and CloudKit data")
+
+        // 1. Best-effort: delete the user's own (private database) CloudKit zones so the
+        //    data doesn't sync back down. Needs network; converges once online. We don't
+        //    touch zones owned by someone who shared a library with us (we can't anyway).
+        let database = ckContainer.privateCloudDatabase
+        database.fetchAllRecordZones { zones, _ in
+            guard let zones else { return }
+            let deletableIDs = zones.map(\.zoneID)
+                .filter { $0.zoneName != CKRecordZone.default().zoneID.zoneName }
+            guard !deletableIDs.isEmpty else { return }
+            database.add(CKModifyRecordZonesOperation(recordZonesToSave: nil, recordZoneIDsToDelete: deletableIDs))
+        }
+
+        // 2. Delete the local store files so this launch starts empty.
+        let base = NSPersistentContainer.defaultDirectoryURL()
+        for store in ["BookScan.sqlite", "BookScan-shared.sqlite"] {
+            for suffix in ["", "-wal", "-shm"] {
+                try? FileManager.default.removeItem(at: base.appendingPathComponent(store + suffix))
+            }
+        }
+
+        // 3. Clear the flag so the reset only happens once.
+        defaults.set(false, forKey: Self.resetFlagKey)
     }
 
     private func configureViewContext() {
