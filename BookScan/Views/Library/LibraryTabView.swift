@@ -110,7 +110,7 @@ struct LibraryTabView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(unshelvedBooks.count) books")
+                Text("\(unshelvedBooks.count) \(unshelvedBooks.count == 1 ? "book" : "books")")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -158,7 +158,7 @@ struct LendingShelfSectionView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(bookCount) books")
+                Text("\(bookCount) \(bookCount == 1 ? "book" : "books")")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -209,7 +209,7 @@ struct ShelfSectionView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(bookCount) books")
+                Text("\(bookCount) \(bookCount == 1 ? "book" : "books")")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 

@@ -47,6 +47,9 @@ struct WebCoverSearchView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") {
+                        // Mark as selected so any in-flight download that completes
+                        // after this dismiss doesn't commit its image to the parent.
+                        hasSelected = true
                         dismiss()
                     }
                 }

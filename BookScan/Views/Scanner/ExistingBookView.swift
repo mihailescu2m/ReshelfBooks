@@ -129,21 +129,25 @@ struct ExistingBookView: View {
     private func startAutoDismissTimer() async {
         timeRemaining = autoDismissSeconds
 
-        // Use Swift Concurrency instead of Timer to avoid memory leaks
-        // The task is automatically cancelled when the view disappears
-        while timeRemaining > 0 && isAutoDismissActive {
-            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+        // Anchor to wall time so that Task.sleep overshoot (which is common on a
+        // loaded device) doesn't cause the countdown to lag behind the clock.
+        let deadline = Date.now.addingTimeInterval(autoDismissSeconds)
 
-            // Check if task was cancelled (view disappeared)
+        while isAutoDismissActive {
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1-second tick
+
             if Task.isCancelled { return }
 
+            let remaining = deadline.timeIntervalSinceNow
+            if remaining <= 0 { break }
             if isAutoDismissActive {
-                timeRemaining -= 0.1
+                timeRemaining = remaining
             }
         }
 
         // Auto-dismiss if timer completed and still active
         if isAutoDismissActive && !Task.isCancelled {
+            timeRemaining = 0
             dismiss()
         }
     }

@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import SwiftData
 import os.log
 
 private let logger = Logger(subsystem: "com.bookscan", category: "NewBook")

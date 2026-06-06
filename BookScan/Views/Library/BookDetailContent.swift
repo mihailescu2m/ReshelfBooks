@@ -22,6 +22,7 @@ struct BookDetailContent: View {
     @State private var showingNewShelfAlert = false
     @State private var showingLendConfirmation = false
     @State private var showingReturnConfirmation = false
+    @State private var showingLendingShelfMissingAlert = false
     @State private var showingImageSourcePicker = false
     @State private var showingCamera = false
     @State private var showingPhotoLibrary = false
@@ -82,6 +83,11 @@ struct BookDetailContent: View {
             }
         } message: {
             Text("This book will be returned to its original shelf.")
+        }
+        .alert("Cannot Lend Book", isPresented: $showingLendingShelfMissingAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("The lending shelf is not available right now. Please try again.")
         }
         .confirmationDialog(
             "Change Cover Image",
@@ -260,7 +266,8 @@ struct BookDetailContent: View {
                     .foregroundColor(.primary)
                 Spacer()
                 if let shelf = shelf {
-                    Text("\(shelf.books?.count ?? 0) books")
+                    let count = shelf.books?.count ?? 0
+                    Text("\(count) \(count == 1 ? "book" : "books")")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -351,7 +358,12 @@ struct BookDetailContent: View {
     }
 
     private func lendBook() {
-        guard let lendingShelf = shelves.lendingShelf else { return }
+        guard let lendingShelf = shelves.lendingShelf else {
+            // The lending shelf should always exist (created at app launch), but
+            // guard against the edge case — show an error rather than silently failing.
+            showingLendingShelfMissingAlert = true
+            return
+        }
 
         withAnimation {
             book.lend(to: lendingShelf)
