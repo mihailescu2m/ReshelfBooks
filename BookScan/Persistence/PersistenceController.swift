@@ -370,6 +370,15 @@ final class PersistenceController: ObservableObject {
     /// Owner-only structural cleanup. Participants never run this, so there is no
     /// multi-writer delete race: only the owner's device merges duplicates.
     func bootstrap() {
+        // Trigger a CloudKit account-status fetch immediately so the result is cached
+        // before the user taps the share button. The very first call to the CKContainer
+        // performs a network round-trip (~100-300 ms) to retrieve the auth token.
+        // UICloudSharingController — and our own container.share() call — both check
+        // account status internally; if that token isn't ready they return a spurious
+        // "not authenticated" error even when the user IS signed in.
+        // Firing this here, at launch, means it's resolved long before the Share tap.
+        if !inMemory { ckContainer.accountStatus { _, _ in } }
+
         // Participants (preferred library lives in the shared store) do no structural
         // maintenance — that avoids any multi-writer delete race on shared data.
         if let active = activeLibrary(creatingIfNeeded: false),

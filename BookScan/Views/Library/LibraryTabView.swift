@@ -84,15 +84,38 @@ struct LibraryTabView: View {
         guard !isPreparingShare else { return }
         guard let library = persistence.activeLibrary(creatingIfNeeded: true) else { return }
         isPreparingShare = true
-        persistence.prepareShare(for: library) { share in
-            isPreparingShare = false
-            guard let share else {
-                // Share couldn't be created — almost always because iCloud isn't
-                // available. Tell the user instead of leaving the button doing nothing.
-                shareUnavailable = true
-                return
+
+        // Verify CloudKit account status BEFORE attempting to create the share.
+        //
+        // Why: the very first call to a CKContainer performs a network round-trip to
+        // fetch the auth token. If container.share() races against that handshake it
+        // can fail with CKError.notAuthenticated even though the user IS signed in,
+        // which would show a misleading "sign in to iCloud" alert. By checking status
+        // first (the result is cached after bootstrap's pre-warm) we either:
+        //   a) get an instant .available → proceed with confidence, or
+        //   b) surface a genuine "not signed in" early with a correct error message.
+        persistence.ckContainer.accountStatus { status, _ in
+            DispatchQueue.main.async {
+                guard status == .available else {
+                    isPreparingShare = false
+                    shareUnavailable = true
+                    return
+                }
+                persistence.prepareShare(for: library) { share in
+                    isPreparingShare = false
+                    guard let share else {
+                        // Share couldn't be created even with a confirmed account —
+                        // some other CloudKit error (network loss, quota, etc.).
+                        shareUnavailable = true
+                        return
+                    }
+                    SharingPresenter.present(
+                        share: share,
+                        container: persistence.ckContainer,
+                        persistence: persistence
+                    )
+                }
             }
-            SharingPresenter.present(share: share, container: persistence.ckContainer, persistence: persistence)
         }
     }
 
