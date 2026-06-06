@@ -49,7 +49,12 @@ actor ISBNLookupService {
 
     // MARK: - Public API
 
-    /// Main lookup function - tries Open Library first, then Google Books as fallback
+    /// Main lookup function — tries Open Library → Google Books → Crossref in order.
+    ///
+    /// Each source covers a different sweet spot:
+    /// - Open Library: classics, public-domain, library-catalogued, older titles
+    /// - Google Books: modern popular / English-language titles
+    /// - Crossref: academic, scientific, textbooks, university press (Springer, OUP, etc.)
     func lookupBook(isbn: String) async throws -> BookMetadata {
         let cleanISBN = ISBNValidator.normalize(isbn)
 
@@ -60,6 +65,12 @@ actor ISBNLookupService {
 
         // Fallback to Google Books
         if let result = try? await lookupFromGoogleBooks(isbn: cleanISBN) {
+            return await ensureCoverImage(for: result)
+        }
+
+        // Second fallback: Crossref — strongest coverage for academic and technical books
+        // that the two consumer-facing sources commonly miss.
+        if let result = try? await lookupFromCrossref(isbn: cleanISBN) {
             return await ensureCoverImage(for: result)
         }
 
@@ -277,6 +288,78 @@ actor ISBNLookupService {
             ?? imageLinks["smallThumbnail"] as? String
 
         return imageURL?.replacingOccurrences(of: "http://", with: "https://")
+    }
+
+    // MARK: - Crossref API
+
+    /// Looks up book metadata from the Crossref API.
+    ///
+    /// Crossref is the DOI registration agency used by virtually every academic and
+    /// scientific publisher worldwide — Springer, Elsevier, Oxford/Cambridge University
+    /// Press, MIT Press, IEEE, ACM, and thousands more. It indexes ~155 million works and
+    /// consistently returns metadata for textbooks, university press titles, and specialist
+    /// non-fiction that Open Library and Google Books both miss.
+    ///
+    /// Free, no API key required. Adding a `mailto:` to the User-Agent header opts the
+    /// request into Crossref's "polite pool" — higher rate limits and prioritised service
+    /// in exchange for being identifiable. This is the API's own documented request.
+    ///
+    /// Crossref does not serve cover images; cover sources are handled separately.
+    private func lookupFromCrossref(isbn: String) async throws -> BookMetadata {
+        let urlString = "https://api.crossref.org/works?filter=isbn:\(isbn)&rows=1"
+        guard let url = URL(string: urlString) else {
+            throw ISBNLookupError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("BookScan/1.3 (mailto:mihailescu2m@gmail.com)", forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw ISBNLookupError.invalidResponse
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let message = json["message"] as? [String: Any],
+              let items = message["items"] as? [[String: Any]],
+              let item = items.first else {
+            throw ISBNLookupError.notFound
+        }
+
+        // Crossref returns title as an array; take the first non-empty element.
+        guard let titleArray = item["title"] as? [String],
+              let title = titleArray.first, !title.isEmpty else {
+            throw ISBNLookupError.notFound
+        }
+
+        // Author entries carry structured "given"/"family" fields; organisations use "name".
+        let author: String
+        if let authors = item["author"] as? [[String: Any]], let first = authors.first {
+            let given  = first["given"]  as? String ?? ""
+            let family = first["family"] as? String ?? ""
+            let full   = [given, family].filter { !$0.isEmpty }.joined(separator: " ")
+            author = full.isEmpty ? (first["name"] as? String ?? "Unknown Author") : full
+        } else {
+            author = "Unknown Author"
+        }
+
+        // date-parts is a nested array: [[year, month, day]] — only year is guaranteed.
+        var yearPublished = "Unknown"
+        if let published  = item["published"]   as? [String: Any],
+           let dateParts  = published["date-parts"] as? [[Int]],
+           let year       = dateParts.first?.first {
+            yearPublished = String(year)
+        }
+
+        return BookMetadata(
+            isbn: isbn,
+            title: title,
+            author: author,
+            yearPublished: yearPublished,
+            coverImageURL: nil   // Crossref doesn't serve cover images
+        )
     }
 
     // MARK: - Open Library API
