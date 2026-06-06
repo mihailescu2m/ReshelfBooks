@@ -49,18 +49,21 @@ actor ISBNLookupService {
 
     // MARK: - Public API
 
-    /// Main lookup function — tries four sources in order, stopping at the first hit.
+    /// Main lookup function — tries five sources in order, stopping at the first hit.
     ///
     /// Each source covers a different sweet spot:
-    /// - Open Library: classics, public-domain, library-catalogued, older titles
+    /// - Open Library (catalog API): classics, public-domain, library-catalogued, older titles
     /// - Google Books: modern popular / English-language titles
+    /// - Open Library (search index): contemporary popular fiction & non-fiction — backed by
+    ///   a different (Solr) index than the catalog API, so it often has records the catalog
+    ///   call misses
     /// - Crossref: academic, scientific, textbooks, university press (Springer, OUP, etc.)
     /// - Library of Congress: niche US-published books, regional publishers, children's
     ///   books, cookbooks, official publications — anything with a US legal deposit record
     func lookupBook(isbn: String) async throws -> BookMetadata {
         let cleanISBN = ISBNValidator.normalize(isbn)
 
-        // Try Open Library first
+        // Try Open Library catalog API first
         if let result = try? await lookupFromOpenLibrary(isbn: cleanISBN) {
             return await ensureCoverImage(for: result)
         }
@@ -70,13 +73,20 @@ actor ISBNLookupService {
             return await ensureCoverImage(for: result)
         }
 
-        // Second fallback: Crossref — strongest coverage for academic and technical books
-        // that the two consumer-facing sources commonly miss.
+        // Second fallback: Open Library search index — a different backend than the catalog
+        // API above, with strong coverage of contemporary popular fiction & non-fiction that
+        // the catalog call (and sometimes Google Books) misses.
+        if let result = try? await lookupFromOpenLibrarySearch(isbn: cleanISBN) {
+            return await ensureCoverImage(for: result)
+        }
+
+        // Third fallback: Crossref — strongest coverage for academic and technical books
+        // that the consumer-facing sources commonly miss.
         if let result = try? await lookupFromCrossref(isbn: cleanISBN) {
             return await ensureCoverImage(for: result)
         }
 
-        // Third fallback: Library of Congress — niche US publications, regional titles,
+        // Fourth fallback: Library of Congress — niche US publications, regional titles,
         // children's books, and official publications not well covered elsewhere.
         if let result = try? await lookupFromLibraryOfCongress(isbn: cleanISBN) {
             return await ensureCoverImage(for: result)
@@ -481,6 +491,58 @@ actor ISBNLookupService {
         var coverImageURL: String? = nil
         if let cover = bookData["cover"] as? [String: Any] {
             coverImageURL = cover["large"] as? String ?? cover["medium"] as? String ?? cover["small"] as? String
+        }
+
+        return BookMetadata(
+            isbn: isbn,
+            title: title,
+            author: author,
+            yearPublished: yearPublished,
+            coverImageURL: coverImageURL
+        )
+    }
+
+    /// Looks up book metadata from the Open Library **search index** (`/search.json`).
+    ///
+    /// This is a separate backend from `lookupFromOpenLibrary` (which hits the `/api/books`
+    /// catalog endpoint). The two indexes are populated independently, so a book absent from
+    /// the catalog API can still be present here — particularly contemporary popular fiction
+    /// and non-fiction. The search index also returns cleaner structured fields:
+    /// `author_name` as an array and `first_publish_year` as an integer.
+    private func lookupFromOpenLibrarySearch(isbn: String) async throws -> BookMetadata {
+        // Restrict the payload to just the fields we use; `limit=1` since ISBN is unique.
+        let urlString = "https://openlibrary.org/search.json?isbn=\(isbn)"
+            + "&fields=title,author_name,first_publish_year,cover_i&limit=1"
+        guard let url = URL(string: urlString) else {
+            throw ISBNLookupError.invalidResponse
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw ISBNLookupError.invalidResponse
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let docs = json["docs"] as? [[String: Any]],
+              let doc = docs.first,
+              let title = doc["title"] as? String, !title.isEmpty else {
+            throw ISBNLookupError.notFound
+        }
+
+        let author = (doc["author_name"] as? [String])?.first ?? "Unknown Author"
+
+        let yearPublished: String
+        if let year = doc["first_publish_year"] as? Int {
+            yearPublished = String(year)
+        } else {
+            yearPublished = "Unknown"
+        }
+
+        var coverImageURL: String? = nil
+        if let coverId = doc["cover_i"] as? Int {
+            coverImageURL = "https://covers.openlibrary.org/b/id/\(coverId)-L.jpg"
         }
 
         return BookMetadata(

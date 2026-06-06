@@ -51,7 +51,7 @@ If BookScan saves you time or you just find it useful, a small donation is great
 ### Scanning & Lookup
 - **Instant barcode scanning** — point the camera at an EAN-13 / ISBN-13 barcode and the book is identified in under a second
 - **Manual ISBN entry** — type any ISBN-10 or ISBN-13 (with full check-digit validation) when a barcode is too worn to scan
-- **Four-source lookup engine** — queries Open Library → Google Books → Crossref → Library of Congress in sequence; each covers a different sweet spot (classics & library-catalogued, popular modern, academic & textbooks, niche US-published & children's) so almost every book is found
+- **Five-source lookup engine** — queries Open Library → Google Books → Open Library search → Crossref → Library of Congress in sequence; each covers a different sweet spot (classics & library-catalogued, popular modern, contemporary popular fiction & non-fiction, academic & textbooks, niche US-published & children's) so almost every book is found
 - **Rich cover art** — searches eight sources concurrently (Open Library, Google Books ×3, WorldCat, Bookcover API, Better World Books, and Open Library search) and picks the best available image
 
 ### Library Management
@@ -198,10 +198,10 @@ BookScan uses the following free, open APIs — no API keys required:
 
 | Service | Used for |
 |---|---|
-| [Open Library](https://openlibrary.org/developers/api) | Book metadata (1st) + cover images by ISBN and title/author search |
+| [Open Library](https://openlibrary.org/developers/api) | Book metadata (1st, catalog API; 3rd, search index) + cover images by ISBN and title/author search |
 | [Google Books API](https://developers.google.com/books) | Book metadata (2nd) + cover images (queried three ways: by ISBN, title+author, title) |
-| [Crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) | Book metadata (3rd) — academic, scientific, and university press titles |
-| [Library of Congress](https://www.loc.gov/apis/) | Book metadata (4th) — niche US-published, regional, children's, cookbooks, official publications |
+| [Crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) | Book metadata (4th) — academic, scientific, and university press titles |
+| [Library of Congress](https://www.loc.gov/apis/) | Book metadata (5th) — niche US-published, regional, children's, cookbooks, official publications |
 | [WorldCat / OCLC](https://www.worldcat.org) | Cover images by ISBN — excellent coverage of academic, older, and non-English titles |
 | [Bookcover API](https://bookcover.longitood.com) | Cover images by ISBN |
 | [Better World Books](https://www.betterworldbooks.com) | Cover images by ISBN |
