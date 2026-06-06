@@ -6,12 +6,17 @@
 //
 
 import SwiftUI
-import SwiftData
+import CoreData
 
 struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
-    @Query private var books: [Book]
-    @Query(sort: \Shelf.sortOrder) private var shelves: [Shelf]
+    @FetchRequest(sortDescriptors: []) private var books: FetchedResults<Book>
+    @FetchRequest(sortDescriptors: [
+        NSSortDescriptor(key: "sortOrder", ascending: true),
+        NSSortDescriptor(key: "dateCreated", ascending: true),
+        NSSortDescriptor(key: "name", ascending: true)
+    ])
+    private var shelves: FetchedResults<Shelf>
 
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
@@ -192,7 +197,7 @@ struct SearchView: View {
                 LazyVStack(spacing: 12) {
                     ForEach(filteredBooks) { book in
                         NavigationLink {
-                            SearchBookDetailView(book: book, shelves: shelves)
+                            SearchBookDetailView(book: book, shelves: Array(shelves))
                         } label: {
                             SearchResultRow(book: book)
                         }
@@ -259,7 +264,7 @@ struct SearchResultRow: View {
 struct SearchBookDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @Bindable var book: Book
+    @ObservedObject var book: Book
     let shelves: [Shelf]
 
     var body: some View {
@@ -273,5 +278,6 @@ struct SearchBookDetailView: View {
 
 #Preview {
     SearchView()
-        .modelContainer(for: [Book.self, Shelf.self], inMemory: true)
+        .environment(\.managedObjectContext, PersistenceController.preview.viewContext)
+        .environmentObject(PersistenceController.preview)
 }

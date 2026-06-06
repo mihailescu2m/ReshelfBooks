@@ -10,7 +10,7 @@
     <array/>
     <key>NSPrivacyAccessedAPITypes</key>
     <array>
-        <!-- UserDefaults API - used by SwiftData for internal state -->
+        <!-- UserDefaults API - used by Core Data / CloudKit for internal state -->
         <dict>
             <key>NSPrivacyAccessedAPIType</key>
             <string>NSPrivacyAccessedAPICategoryUserDefaults</string>

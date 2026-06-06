@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import SwiftData
+import CoreData
 import os.log
 
 private let logger = Logger(subsystem: "com.bookscan", category: "Scanner")
@@ -43,9 +43,14 @@ struct ScannerTabView: View {
     /// it is, so we don't hold the camera (and show the green indicator) on other tabs.
     var isTabActive: Bool = true
 
-    @Environment(\.modelContext) private var modelContext
-    @Query private var books: [Book]
-    @Query(sort: \Shelf.sortOrder) private var shelves: [Shelf]
+    @EnvironmentObject private var persistence: PersistenceController
+    @FetchRequest(sortDescriptors: []) private var books: FetchedResults<Book>
+    @FetchRequest(sortDescriptors: [
+        NSSortDescriptor(key: "sortOrder", ascending: true),
+        NSSortDescriptor(key: "dateCreated", ascending: true),
+        NSSortDescriptor(key: "name", ascending: true)
+    ])
+    private var shelves: FetchedResults<Shelf>
 
     @State private var scannedCode: String?
     @State private var isScanning = true
@@ -85,9 +90,14 @@ struct ScannerTabView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Scan Book")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    // Same style as the Library title (centered, .headline, adaptive).
+                    Text("Scan Book")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         resetScanner()
@@ -116,7 +126,7 @@ struct ScannerTabView: View {
                 transition(to: .manualEntry(initialISBN: nil))
             })
         case .newBook(let metadata):
-            NewBookView(metadata: metadata, shelves: shelves, onSave: { shelf, coverImage in
+            NewBookView(metadata: metadata, shelves: Array(shelves), onSave: { shelf, coverImage in
                 saveNewBook(metadata: metadata, shelf: shelf, coverImage: coverImage)
             }, onManualEntry: {
                 transition(to: .manualEntry(initialISBN: nil))
@@ -216,6 +226,7 @@ struct ScannerTabView: View {
             // Scanning a lent book returns it (per the lending shelf's instructions).
             if book.isLent {
                 book.returnBook()
+                persistence.save()
                 activeSheet = .existingBook(book, wasReturned: true)
             } else {
                 activeSheet = .existingBook(book, wasReturned: false)
@@ -254,7 +265,9 @@ struct ScannerTabView: View {
     }
 
     private func saveNewBook(metadata: BookMetadata, shelf: Shelf?, coverImage: UIImage?) {
-        let book = Book(
+        // Factory attaches the book to the active library and assigns it to the
+        // correct CloudKit store (private for the owner, shared for a participant).
+        let book = persistence.makeBook(
             isbn: metadata.isbn,
             title: metadata.title,
             author: metadata.author,
@@ -262,13 +275,14 @@ struct ScannerTabView: View {
             coverImageURL: metadata.coverImageURL,
             shelf: shelf
         )
-        modelContext.insert(book)
 
         if let coverImage {
             // Reuse the image already downloaded for the preview — no second fetch.
             book.coverImageData = coverImage.coverJPEGData()
+            persistence.save()
         } else if let coverURL = metadata.coverImageURL {
-            // Preview hadn't finished loading yet; fetch the cover now.
+            // Persist the book now; fetch the cover asynchronously.
+            persistence.save()
             Task {
                 do {
                     let rawData = try await ISBNLookupService.shared.downloadCoverImage(from: coverURL)
@@ -280,6 +294,7 @@ struct ScannerTabView: View {
                         // The user may have deleted the book while the cover downloaded.
                         guard !book.isDeleted else { return }
                         book.coverImageData = imageData
+                        persistence.save()
                     }
                     logger.info("Successfully downloaded cover image for ISBN \(metadata.isbn)")
                 } catch {
@@ -287,6 +302,8 @@ struct ScannerTabView: View {
                     logger.warning("Failed to download cover image for ISBN \(metadata.isbn): \(error.localizedDescription)")
                 }
             }
+        } else {
+            persistence.save()
         }
         // NewBookView dismisses itself, which runs resetScanner via handleSheetDismiss.
     }
@@ -305,5 +322,6 @@ struct ScannerTabView: View {
 
 #Preview {
     ScannerTabView()
-        .modelContainer(for: [Book.self, Shelf.self], inMemory: true)
+        .environment(\.managedObjectContext, PersistenceController.preview.viewContext)
+        .environmentObject(PersistenceController.preview)
 }

@@ -6,15 +6,14 @@
 //
 
 import SwiftUI
-import SwiftData
 
 /// Shared content view for displaying and editing book details.
 /// Used by both BookDetailView (sheet) and SearchBookDetailView (navigation).
 struct BookDetailContent: View {
-    @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var persistence: PersistenceController
     @Environment(\.dismiss) private var dismiss
 
-    @Bindable var book: Book
+    @ObservedObject var book: Book
     let shelves: [Shelf]
     let onDelete: (() -> Void)?
 
@@ -37,18 +36,24 @@ struct BookDetailContent: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                bookCoverSection
+            // If a family member deletes this book while we have it open, the object's
+            // relationships fault to rows that no longer exist — rendering them would
+            // crash. Render nothing and dismiss instead (see onChange below).
+            if !book.isDeleted {
+                VStack(spacing: 24) {
+                    bookCoverSection
 
-                bookInfoSection
+                    bookInfoSection
 
-                shelfSelectionSection
+                    shelfSelectionSection
 
-                actionButtonsSection
+                    actionButtonsSection
+                }
+                .padding()
             }
-            .padding()
         }
-        .newShelfAlert(isPresented: $showingNewShelfAlert, existingShelfCount: shelves.count) { newShelf in
+        .dismissWhenDeleted(book)
+        .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
             book.shelf = newShelf
         }
         .confirmationDialog(
@@ -106,6 +111,7 @@ struct BookDetailContent: View {
             if book.coverImageData != nil {
                 Button("Remove Cover", role: .destructive) {
                     book.coverImageData = nil
+                    persistence.save()
                 }
             }
         }
@@ -128,6 +134,7 @@ struct BookDetailContent: View {
             if let image = newImage {
                 // Size-cap + re-encode (web-search results arrive at full resolution).
                 book.coverImageData = image.coverJPEGData()
+                persistence.save()
                 selectedImage = nil
             }
         }
@@ -177,7 +184,7 @@ struct BookDetailContent: View {
                 infoRow(label: "Author", value: book.author)
                 infoRow(label: "Year", value: book.yearPublished)
                 infoRow(label: "ISBN", value: book.isbn)
-                infoRow(label: "Added", value: book.dateAdded.formatted(date: .abbreviated, time: .omitted))
+                infoRow(label: "Added", value: book.dateAdded?.formatted(date: .abbreviated, time: .omitted) ?? "—")
             }
         }
         .padding()
@@ -252,12 +259,16 @@ struct BookDetailContent: View {
     }
 
     private func shelfOption(_ shelf: Shelf?, label: String) -> some View {
-        let isSelected = book.shelf?.id == shelf?.id
+        // Compare by object identity, not an (optional) id attribute: legacy records
+        // synced from the old schema can have a nil id, which would make `nil == nil`
+        // match both "Unshelved" and the real shelf at once.
+        let isSelected = book.shelf == shelf
 
         return Button {
             withAnimation {
                 book.shelf = shelf
             }
+            persistence.save()
         } label: {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -348,19 +359,16 @@ struct BookDetailContent: View {
     // MARK: - Actions
 
     private func deleteBook() {
-        modelContext.delete(book)
-
-        // Force save to ensure deletion is persisted immediately
-        // This prevents potential caching issues when scanning the same book again
-        try? modelContext.save()
-
+        // Save immediately so a re-scan of the same book doesn't find a stale record.
+        persistence.delete(book)
+        persistence.save()
         onDelete?()
     }
 
     private func lendBook() {
-        guard let lendingShelf = shelves.lendingShelf else {
-            // The lending shelf should always exist (created at app launch), but
-            // guard against the edge case — show an error rather than silently failing.
+        guard let lendingShelf = persistence.lendingShelf(creatingIfNeeded: true) else {
+            // The lending shelf is created on demand; guard the edge case where it
+            // can't be (e.g. no writable store) by surfacing an error, not failing silently.
             showingLendingShelfMissingAlert = true
             return
         }
@@ -368,6 +376,7 @@ struct BookDetailContent: View {
         withAnimation {
             book.lend(to: lendingShelf)
         }
+        persistence.save()
         dismiss()
     }
 
@@ -375,6 +384,7 @@ struct BookDetailContent: View {
         withAnimation {
             book.returnBook()
         }
+        persistence.save()
         dismiss()
     }
 }
@@ -446,21 +456,19 @@ struct BookCoverImage: View {
 }
 
 #Preview {
-    let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    let container = try! ModelContainer(for: Book.self, Shelf.self, configurations: config)
-
-    let shelf = Shelf(name: "Fiction", sortOrder: 0)
-    container.mainContext.insert(shelf)
-
-    let book = Book(
+    let persistence = PersistenceController.preview
+    let shelf = persistence.makeShelf(name: "Fiction")
+    let book = persistence.makeBook(
         isbn: "9780141439518",
         title: "Pride and Prejudice",
         author: "Jane Austen",
         yearPublished: "1813",
+        coverImageURL: nil,
         shelf: shelf
     )
-    container.mainContext.insert(book)
+    persistence.save()
 
     return BookDetailContent(book: book, shelves: [shelf])
-        .modelContainer(container)
+        .environment(\.managedObjectContext, persistence.viewContext)
+        .environmentObject(persistence)
 }

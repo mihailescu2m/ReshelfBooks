@@ -59,7 +59,7 @@ struct NewBookView: View {
                     }
                 }
             }
-            .newShelfAlert(isPresented: $showingNewShelfAlert, existingShelfCount: shelves.count) { newShelf in
+            .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
                 selectedShelf = newShelf
             }
             .task {
@@ -244,5 +244,6 @@ struct NewBookView: View {
     )
 
     return NewBookView(metadata: metadata, shelves: []) { _, _ in }
-        .modelContainer(for: [Book.self, Shelf.self], inMemory: true)
+        .environment(\.managedObjectContext, PersistenceController.preview.viewContext)
+        .environmentObject(PersistenceController.preview)
 }

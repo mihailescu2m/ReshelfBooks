@@ -6,17 +6,16 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct ExistingBookView: View {
     @Environment(\.dismiss) private var dismiss
-    let book: Book
+    @ObservedObject var book: Book
     let wasReturned: Bool
     let onManualEntry: (() -> Void)?
 
     // Quick Scan Mode
-    private let autoDismissSeconds: Double = 3.0
-    @State private var timeRemaining: Double = 3.0
+    private let autoDismissSeconds: Double = 5.0
+    @State private var timeRemaining: Double = 5.0
     @State private var isAutoDismissActive = true
 
     init(book: Book, wasReturned: Bool = false, onManualEntry: (() -> Void)? = nil) {
@@ -27,33 +26,41 @@ struct ExistingBookView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Text(wasReturned ? "Book Returned" : "Book Found")
-                    .font(.title2)
-                    .fontWeight(.bold)
-
-                if wasReturned {
-                    returnedBanner
-                }
-
-                bookInfoCard
-
-                notRightBookLink
-
-                shelfLocationCard
-
-                Spacer()
-
-                if isAutoDismissActive {
-                    countdownSection
+            Group {
+                // If a family member deletes this book while it's on screen, its
+                // relationships fault to rows that no longer exist — don't render them.
+                if book.isDeleted {
+                    Color.clear
                 } else {
-                    doneButton
+                    VStack(spacing: 24) {
+                        Text(wasReturned ? "Book Returned" : "Book Found")
+                            .font(.title2)
+                            .fontWeight(.bold)
+
+                        if wasReturned {
+                            returnedBanner
+                        }
+
+                        bookInfoCard
+
+                        notRightBookLink
+
+                        shelfLocationCard
+
+                        Spacer()
+
+                        if isAutoDismissActive {
+                            countdownSection
+                        } else {
+                            doneButton
+                        }
+                    }
+                    .padding()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        cancelAutoDismiss()
+                    }
                 }
-            }
-            .padding()
-            .contentShape(Rectangle())
-            .onTapGesture {
-                cancelAutoDismiss()
             }
             .navigationTitle("Book Location")
             .navigationBarTitleDisplayMode(.inline)
@@ -67,6 +74,7 @@ struct ExistingBookView: View {
             .task {
                 await startAutoDismissTimer()
             }
+            .dismissWhenDeleted(book)
         }
     }
 
@@ -247,21 +255,19 @@ struct ExistingBookView: View {
 }
 
 #Preview {
-    let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    let container = try! ModelContainer(for: Book.self, Shelf.self, configurations: config)
-
-    let shelf = Shelf(name: "Fiction", sortOrder: 0)
-    container.mainContext.insert(shelf)
-
-    let book = Book(
+    let persistence = PersistenceController.preview
+    let shelf = persistence.makeShelf(name: "Fiction")
+    let book = persistence.makeBook(
         isbn: "9780141439518",
         title: "Pride and Prejudice",
         author: "Jane Austen",
         yearPublished: "1813",
+        coverImageURL: nil,
         shelf: shelf
     )
-    container.mainContext.insert(book)
+    persistence.save()
 
     return ExistingBookView(book: book)
-        .modelContainer(container)
+        .environment(\.managedObjectContext, persistence.viewContext)
+        .environmentObject(persistence)
 }

@@ -6,10 +6,54 @@
 //
 
 import Testing
-import SwiftData
+import CoreData
 import Foundation
 import UIKit
 @testable import BookScan
+
+// MARK: - Core Data test helpers
+
+/// A fresh in-memory Core Data stack per test, so model objects have a context and
+/// tests don't share state.
+private func makeTestContext() -> NSManagedObjectContext {
+    PersistenceController(inMemory: true).viewContext
+}
+
+@discardableResult
+private func makeBook(
+    in context: NSManagedObjectContext,
+    isbn: String,
+    title: String,
+    author: String,
+    yearPublished: String,
+    coverImageURL: String? = nil,
+    shelf: Shelf? = nil
+) -> Book {
+    let book = NSEntityDescription.insertNewObject(forEntityName: "Book", into: context) as! Book
+    book.dateAdded = Date()
+    book.isbn = isbn
+    book.title = title
+    book.author = author
+    book.yearPublished = yearPublished
+    book.coverImageURL = coverImageURL
+    book.shelf = shelf
+    return book
+}
+
+@discardableResult
+private func makeShelf(
+    in context: NSManagedObjectContext,
+    name: String,
+    sortOrder: Int64 = 0,
+    isLendingShelf: Bool = false
+) -> Shelf {
+    let shelf = NSEntityDescription.insertNewObject(forEntityName: "Shelf", into: context) as! Shelf
+    shelf.dateCreated = Date()
+    shelf.name = name
+    shelf.sortOrder = sortOrder
+    shelf.isLendingShelf = isLendingShelf
+    return shelf
+}
 
 // MARK: - Book Model Tests
 
@@ -18,7 +62,9 @@ struct BookModelTests {
 
     @Test("Book initialization sets all properties correctly")
     func bookInitialization() {
-        let book = Book(
+        let context = makeTestContext()
+        let book = makeBook(
+            in: context,
             isbn: "9780141439518",
             title: "Pride and Prejudice",
             author: "Jane Austen",
@@ -38,47 +84,35 @@ struct BookModelTests {
 
     @Test("Book isLent returns false when not on lending shelf")
     func bookIsLentFalseWhenNotOnLendingShelf() {
-        let book = Book(
-            isbn: "9780141439518",
-            title: "Pride and Prejudice",
-            author: "Jane Austen",
-            yearPublished: "1813"
-        )
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
 
         // No shelf
         #expect(book.isLent == false)
 
         // Regular shelf
-        let regularShelf = Shelf(name: "Fiction", sortOrder: 0, isLendingShelf: false)
+        let regularShelf = makeShelf(in: context, name: "Fiction", isLendingShelf: false)
         book.shelf = regularShelf
         #expect(book.isLent == false)
     }
 
     @Test("Book isLent returns true when on lending shelf")
     func bookIsLentTrueWhenOnLendingShelf() {
-        let book = Book(
-            isbn: "9780141439518",
-            title: "Pride and Prejudice",
-            author: "Jane Austen",
-            yearPublished: "1813"
-        )
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
 
-        let lendingShelf = Shelf(name: "Lent", sortOrder: 0, isLendingShelf: true)
+        let lendingShelf = makeShelf(in: context, name: "Lent", isLendingShelf: true)
         book.shelf = lendingShelf
         #expect(book.isLent == true)
     }
 
     @Test("Book lend() moves book to lending shelf and stores previous shelf")
     func bookLendStoresPreviousShelf() {
-        let book = Book(
-            isbn: "9780141439518",
-            title: "Pride and Prejudice",
-            author: "Jane Austen",
-            yearPublished: "1813"
-        )
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
 
-        let originalShelf = Shelf(name: "Fiction", sortOrder: 0, isLendingShelf: false)
-        let lendingShelf = Shelf(name: "Lent", sortOrder: 1, isLendingShelf: true)
+        let originalShelf = makeShelf(in: context, name: "Fiction", isLendingShelf: false)
+        let lendingShelf = makeShelf(in: context, name: "Lent", sortOrder: 1, isLendingShelf: true)
 
         book.shelf = originalShelf
         book.lend(to: lendingShelf)
@@ -90,14 +124,10 @@ struct BookModelTests {
 
     @Test("Book lend() works when book has no shelf")
     func bookLendFromUnshelved() {
-        let book = Book(
-            isbn: "9780141439518",
-            title: "Pride and Prejudice",
-            author: "Jane Austen",
-            yearPublished: "1813"
-        )
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
 
-        let lendingShelf = Shelf(name: "Lent", sortOrder: 0, isLendingShelf: true)
+        let lendingShelf = makeShelf(in: context, name: "Lent", isLendingShelf: true)
 
         #expect(book.shelf == nil)
         book.lend(to: lendingShelf)
@@ -109,15 +139,11 @@ struct BookModelTests {
 
     @Test("Book lend() ignores non-lending shelves")
     func bookLendIgnoresNonLendingShelf() {
-        let book = Book(
-            isbn: "9780141439518",
-            title: "Pride and Prejudice",
-            author: "Jane Austen",
-            yearPublished: "1813"
-        )
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
 
-        let originalShelf = Shelf(name: "Fiction", sortOrder: 0, isLendingShelf: false)
-        let notLendingShelf = Shelf(name: "Not Lending", sortOrder: 1, isLendingShelf: false)
+        let originalShelf = makeShelf(in: context, name: "Fiction", isLendingShelf: false)
+        let notLendingShelf = makeShelf(in: context, name: "Not Lending", sortOrder: 1, isLendingShelf: false)
 
         book.shelf = originalShelf
         book.lend(to: notLendingShelf)
@@ -129,15 +155,11 @@ struct BookModelTests {
 
     @Test("Book returnBook() restores previous shelf")
     func bookReturnRestoresPreviousShelf() {
-        let book = Book(
-            isbn: "9780141439518",
-            title: "Pride and Prejudice",
-            author: "Jane Austen",
-            yearPublished: "1813"
-        )
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
 
-        let originalShelf = Shelf(name: "Fiction", sortOrder: 0, isLendingShelf: false)
-        let lendingShelf = Shelf(name: "Lent", sortOrder: 1, isLendingShelf: true)
+        let originalShelf = makeShelf(in: context, name: "Fiction", isLendingShelf: false)
+        let lendingShelf = makeShelf(in: context, name: "Lent", sortOrder: 1, isLendingShelf: true)
 
         book.shelf = originalShelf
         book.lend(to: lendingShelf)
@@ -150,14 +172,10 @@ struct BookModelTests {
 
     @Test("Book returnBook() sets shelf to nil when no previous shelf")
     func bookReturnToUnshelved() {
-        let book = Book(
-            isbn: "9780141439518",
-            title: "Pride and Prejudice",
-            author: "Jane Austen",
-            yearPublished: "1813"
-        )
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
 
-        let lendingShelf = Shelf(name: "Lent", sortOrder: 0, isLendingShelf: true)
+        let lendingShelf = makeShelf(in: context, name: "Lent", isLendingShelf: true)
 
         book.lend(to: lendingShelf)
         book.returnBook()
@@ -175,7 +193,8 @@ struct ShelfModelTests {
 
     @Test("Shelf initialization sets all properties correctly")
     func shelfInitialization() {
-        let shelf = Shelf(name: "Fiction", sortOrder: 5, isLendingShelf: false)
+        let context = makeTestContext()
+        let shelf = makeShelf(in: context, name: "Fiction", sortOrder: 5, isLendingShelf: false)
 
         #expect(shelf.name == "Fiction")
         #expect(shelf.sortOrder == 5)
@@ -185,17 +204,19 @@ struct ShelfModelTests {
 
     @Test("Lending shelf initialization")
     func lendingShelfInitialization() {
-        let shelf = Shelf(name: "Lent", sortOrder: 0, isLendingShelf: true)
+        let context = makeTestContext()
+        let shelf = makeShelf(in: context, name: "Lent", isLendingShelf: true)
 
         #expect(shelf.isLendingShelf == true)
     }
 
     @Test("Array extension regularShelves filters out lending shelf")
     func regularShelvesFiltering() {
+        let context = makeTestContext()
         let shelves = [
-            Shelf(name: "Fiction", sortOrder: 0, isLendingShelf: false),
-            Shelf(name: "Non-Fiction", sortOrder: 1, isLendingShelf: false),
-            Shelf(name: "Lent", sortOrder: 2, isLendingShelf: true)
+            makeShelf(in: context, name: "Fiction", sortOrder: 0, isLendingShelf: false),
+            makeShelf(in: context, name: "Non-Fiction", sortOrder: 1, isLendingShelf: false),
+            makeShelf(in: context, name: "Lent", sortOrder: 2, isLendingShelf: true)
         ]
 
         let regularShelves = shelves.regularShelves
@@ -206,9 +227,10 @@ struct ShelfModelTests {
 
     @Test("Array extension lendingShelf returns lending shelf")
     func lendingShelfFinding() {
+        let context = makeTestContext()
         let shelves = [
-            Shelf(name: "Fiction", sortOrder: 0, isLendingShelf: false),
-            Shelf(name: "Lent", sortOrder: 1, isLendingShelf: true)
+            makeShelf(in: context, name: "Fiction", sortOrder: 0, isLendingShelf: false),
+            makeShelf(in: context, name: "Lent", sortOrder: 1, isLendingShelf: true)
         ]
 
         let lendingShelf = shelves.lendingShelf
@@ -220,9 +242,10 @@ struct ShelfModelTests {
 
     @Test("Array extension lendingShelf returns nil when no lending shelf")
     func lendingShelfNilWhenMissing() {
+        let context = makeTestContext()
         let shelves = [
-            Shelf(name: "Fiction", sortOrder: 0, isLendingShelf: false),
-            Shelf(name: "Non-Fiction", sortOrder: 1, isLendingShelf: false)
+            makeShelf(in: context, name: "Fiction", sortOrder: 0, isLendingShelf: false),
+            makeShelf(in: context, name: "Non-Fiction", sortOrder: 1, isLendingShelf: false)
         ]
 
         let lendingShelf = shelves.lendingShelf
@@ -236,6 +259,18 @@ struct ShelfModelTests {
 
         #expect(shelves.regularShelves.isEmpty)
         #expect(shelves.lendingShelf == nil)
+    }
+
+    @Test("Lending shelf dedup picks the earliest-created shelf")
+    func lendingShelfPicksEarliest() {
+        let context = makeTestContext()
+        let older = makeShelf(in: context, name: "Lent", isLendingShelf: true)
+        older.dateCreated = Date(timeIntervalSince1970: 1_000)
+        let newer = makeShelf(in: context, name: "Lent", isLendingShelf: true)
+        newer.dateCreated = Date(timeIntervalSince1970: 2_000)
+
+        let shelves = [newer, older]
+        #expect(shelves.lendingShelf === older)
     }
 }
 

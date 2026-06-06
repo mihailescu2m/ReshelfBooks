@@ -6,9 +6,9 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
+    @EnvironmentObject private var persistence: PersistenceController
     @State private var selectedTab = 1
     @State private var showingSearch = false
 
@@ -30,6 +30,34 @@ struct ContentView: View {
         .sheet(isPresented: $showingSearch) {
             SearchView()
         }
+        // Shown only after joining a shared library while the joiner still has local
+        // books that aren't part of it — never a silent delete.
+        .alert("Joined Shared Library", isPresented: Binding(
+            get: { persistence.pendingJoinLocalBookCount != nil },
+            set: { if !$0 { persistence.keepLocalDataAfterJoin() } }
+        )) {
+            Button("Keep My Books") { persistence.keepLocalDataAfterJoin() }
+            Button("Delete My Books", role: .destructive) { persistence.discardLocalDataAfterJoin() }
+        } message: {
+            Text(joinPromptMessage)
+        }
+        // Shown when a share invitation is declined because the user already owns a
+        // shared library of their own.
+        .alert("Can't Join Library", isPresented: Binding(
+            get: { persistence.joinBlockedReason != nil },
+            set: { if !$0 { persistence.joinBlockedReason = nil } }
+        )) {
+            Button("OK", role: .cancel) { persistence.joinBlockedReason = nil }
+        } message: {
+            Text(persistence.joinBlockedReason ?? "")
+        }
+    }
+
+    private var joinPromptMessage: String {
+        let count = persistence.pendingJoinLocalBookCount ?? 0
+        let books = count == 1 ? "book" : "books"
+        return "You have \(count) \(books) that aren't part of the shared library. "
+            + "Keep them in your own library, or delete them?"
     }
 
     private var floatingTabBar: some View {
@@ -90,5 +118,6 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Book.self, Shelf.self], inMemory: true)
+        .environment(\.managedObjectContext, PersistenceController.preview.viewContext)
+        .environmentObject(PersistenceController.preview)
 }

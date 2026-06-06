@@ -6,38 +6,41 @@
 //
 
 import Foundation
-import SwiftData
+import CoreData
 
-@Model
-final class Shelf {
-    // CloudKit requires all attributes to have default values or be optional
-    var name: String = ""
-    var dateCreated: Date = Date()
-    var sortOrder: Int = 0
-    var isLendingShelf: Bool = false
+@objc(Shelf)
+public final class Shelf: NSManagedObject {
+    // CloudKit requires every attribute to be optional or have a default value.
+    @NSManaged public var name: String
+    @NSManaged public var dateCreated: Date?
+    @NSManaged public var sortOrder: Int64
+    @NSManaged public var isLendingShelf: Bool
 
-    // CloudKit requires all relationships to be optional (use optional array)
-    @Relationship(deleteRule: .nullify)
-    var books: [Book]? = []
+    // CloudKit requires every relationship to be optional and have an inverse.
+    @NSManaged public var library: Library?
+    @NSManaged public var books: Set<Book>?
+    @NSManaged public var previousBooks: Set<Book>?
 
-    // Inverse relationship for Book.previousShelf (required by CloudKit)
-    @Relationship(deleteRule: .nullify)
-    var previousBooks: [Book]? = []
-
-    init(name: String, sortOrder: Int = 0, isLendingShelf: Bool = false) {
-        self.name = name
-        self.dateCreated = Date()
-        self.sortOrder = sortOrder
-        self.isLendingShelf = isLendingShelf
-        self.books = []
-        self.previousBooks = []
+    static func fetchRequestAll() -> NSFetchRequest<Shelf> {
+        NSFetchRequest<Shelf>(entityName: "Shelf")
     }
+
+    /// Convenience: the books on this shelf as a plain array (the relationship is a Set).
+    var bookList: [Book] {
+        Array(books ?? [])
+    }
+}
+
+extension Shelf: Identifiable {
+    // Use the always-present, unique objectID rather than a stored optional UUID
+    // (legacy records can have a nil id, which collides in ForEach / sheet(item:)).
+    public var id: NSManagedObjectID { objectID }
 }
 
 // MARK: - Array Extension for Shelf Filtering
 
-extension Array where Element == Shelf {
-    /// Returns only regular shelves (excluding the lending shelf)
+extension Sequence where Element == Shelf {
+    /// Returns only regular shelves (excluding the lending shelf), as an array.
     var regularShelves: [Shelf] {
         filter { !$0.isLendingShelf }
     }
@@ -46,6 +49,7 @@ extension Array where Element == Shelf {
     /// If duplicates exist (e.g. a CloudKit sync race before dedup runs), the
     /// earliest-created shelf is returned so the choice is stable everywhere.
     var lendingShelf: Shelf? {
-        filter { $0.isLendingShelf }.min { $0.dateCreated < $1.dateCreated }
+        filter { $0.isLendingShelf }
+            .min { ($0.dateCreated ?? .distantFuture) < ($1.dateCreated ?? .distantFuture) }
     }
 }

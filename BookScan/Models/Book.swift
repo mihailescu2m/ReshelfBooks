@@ -6,62 +6,56 @@
 //
 
 import Foundation
-import SwiftData
+import CoreData
 
-@Model
-final class Book {
-    // CloudKit requires all attributes to have default values or be optional
-    var isbn: String = ""
-    var title: String = ""
-    var author: String = ""
-    var yearPublished: String = ""
-    var coverImageURL: String?
-    var coverImageData: Data?
-    var dateAdded: Date = Date()
+@objc(Book)
+public final class Book: NSManagedObject {
+    // CloudKit requires every attribute to be optional or have a default value.
+    @NSManaged public var isbn: String
+    @NSManaged public var title: String
+    @NSManaged public var author: String
+    @NSManaged public var yearPublished: String
+    @NSManaged public var coverImageURL: String?
+    @NSManaged public var coverImageData: Data?
+    @NSManaged public var dateAdded: Date?
 
-    @Relationship(inverse: \Shelf.books)
-    var shelf: Shelf?
+    // CloudKit requires every relationship to be optional and have an inverse.
+    @NSManaged public var library: Library?
+    @NSManaged public var shelf: Shelf?
+    /// The shelf the book lived on before being lent, so it can be returned later.
+    @NSManaged public var previousShelf: Shelf?
 
-    // Stores the original shelf before lending
-    // CloudKit requires all relationships to have an inverse
-    @Relationship(inverse: \Shelf.previousBooks)
-    var previousShelf: Shelf?
+    static func fetchRequestAll() -> NSFetchRequest<Book> {
+        NSFetchRequest<Book>(entityName: "Book")
+    }
 
-    // Computed property to check if book is currently lent
-    var isLent: Bool {
+    // MARK: - Lending state
+
+    /// Whether the book is currently on the lending shelf.
+    public var isLent: Bool {
         shelf?.isLendingShelf ?? false
     }
 
     // MARK: - Lending Actions
 
-    /// Lends the book by moving it to the lending shelf.
-    /// Stores the current shelf in `previousShelf` so it can be returned later.
-    /// - Parameter lendingShelf: The special lending shelf to move the book to
+    /// Lends the book by moving it to the lending shelf, remembering its current
+    /// shelf so it can be returned later. No-op if `lendingShelf` isn't a lending shelf.
     func lend(to lendingShelf: Shelf) {
         guard lendingShelf.isLendingShelf else { return }
-
-        // Store the current shelf before moving to lent
         previousShelf = shelf
-
-        // Move to lending shelf
         shelf = lendingShelf
     }
 
-    /// Returns the book to its original shelf (or unshelved if no previous shelf).
-    /// Clears the `previousShelf` reference after returning.
+    /// Returns the book to its original shelf (or unshelved if none) and clears the
+    /// remembered previous shelf.
     func returnBook() {
         shelf = previousShelf
         previousShelf = nil
     }
+}
 
-    init(isbn: String, title: String, author: String, yearPublished: String, coverImageURL: String? = nil, coverImageData: Data? = nil, shelf: Shelf? = nil) {
-        self.isbn = isbn
-        self.title = title
-        self.author = author
-        self.yearPublished = yearPublished
-        self.coverImageURL = coverImageURL
-        self.coverImageData = coverImageData
-        self.dateAdded = Date()
-        self.shelf = shelf
-    }
+extension Book: Identifiable {
+    // Use the always-present, unique objectID rather than a stored optional UUID
+    // (legacy records can have a nil id, which collides in ForEach / sheet(item:)).
+    public var id: NSManagedObjectID { objectID }
 }

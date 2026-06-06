@@ -6,16 +6,29 @@
 //
 
 import SwiftUI
-import SwiftData
+import CoreData
 
 struct LibraryTabView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Shelf.sortOrder) private var shelves: [Shelf]
-    @Query private var books: [Book]
+    @EnvironmentObject private var persistence: PersistenceController
+
+    @FetchRequest(
+        sortDescriptors: [
+            NSSortDescriptor(key: "sortOrder", ascending: true),
+            // Deterministic tiebreaks so all devices order shelves identically even
+            // when two of them pick the same sortOrder concurrently.
+            NSSortDescriptor(key: "dateCreated", ascending: true),
+            NSSortDescriptor(key: "name", ascending: true)
+        ],
+        animation: .default
+    ) private var shelves: FetchedResults<Shelf>
+
+    @FetchRequest(sortDescriptors: [], animation: .default)
+    private var books: FetchedResults<Book>
 
     @State private var showingNewShelfAlert = false
     @State private var selectedBook: Book?
-    @State private var showingBookDetail = false
+    @State private var isPreparingShare = false
+    @State private var shareUnavailable = false
 
     var body: some View {
         NavigationStack {
@@ -26,8 +39,20 @@ struct LibraryTabView: View {
                     libraryContentView
                 }
             }
-            .navigationTitle("Library")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        presentSharing()
+                    } label: {
+                        Label("Share Library", systemImage: "square.and.arrow.up")
+                    }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text(persistence.isLibraryShared ? "Shared Library" : "Library")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingNewShelfAlert = true
@@ -36,15 +61,43 @@ struct LibraryTabView: View {
                     }
                 }
             }
-            .newShelfAlert(isPresented: $showingNewShelfAlert, existingShelfCount: shelves.count)
+            .newShelfAlert(isPresented: $showingNewShelfAlert)
             .sheet(item: $selectedBook) { book in
-                BookDetailView(book: book, shelves: shelves)
+                BookDetailView(book: book, shelves: Array(shelves))
+            }
+            .onAppear {
+                persistence.refreshSharedState()
+            }
+            .alert("Sharing Unavailable", isPresented: $shareUnavailable) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Family sharing needs iCloud. Make sure you're signed into iCloud in Settings, then try again.")
             }
         }
     }
 
-    /// Check if there is nothing to display anywhere: no regular shelves and no
-    /// books at all (lent books still render in the lending section, so they count).
+    /// Opens the family-sharing sheet. Resolves (creating if needed) the library and
+    /// its share when invoked, so we never create objects as a side effect of rendering.
+    private func presentSharing() {
+        // Guard against a double-tap kicking off a second container.share() before the
+        // first finishes — that would create a duplicate share zone.
+        guard !isPreparingShare else { return }
+        guard let library = persistence.activeLibrary(creatingIfNeeded: true) else { return }
+        isPreparingShare = true
+        persistence.prepareShare(for: library) { share in
+            isPreparingShare = false
+            guard let share else {
+                // Share couldn't be created — almost always because iCloud isn't
+                // available. Tell the user instead of leaving the button doing nothing.
+                shareUnavailable = true
+                return
+            }
+            SharingPresenter.present(share: share, container: persistence.ckContainer, persistence: persistence)
+        }
+    }
+
+    /// Nothing to display anywhere: no regular shelves and no books at all
+    /// (lent books still render in the lending section, so they count).
     private var isLibraryEmpty: Bool {
         shelves.regularShelves.isEmpty && books.isEmpty
     }
@@ -98,7 +151,8 @@ struct LibraryTabView: View {
     }
 
     private var unshelvedBooks: [Book] {
-        books.filter { $0.shelf == nil }.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        books.filter { $0.shelf == nil }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
     private var unshelvedBooksSection: some View {
@@ -128,21 +182,22 @@ struct LibraryTabView: View {
     }
 
     private func deleteShelf(_ shelf: Shelf) {
-        for book in shelf.books ?? [] {
+        for book in shelf.bookList {
             book.shelf = nil
         }
-        modelContext.delete(shelf)
+        persistence.delete(shelf)
+        persistence.save()
     }
 }
 
 // MARK: - Lending Shelf Section (special styling, no delete option)
 
 struct LendingShelfSectionView: View {
-    let shelf: Shelf
+    @ObservedObject var shelf: Shelf
     let onBookTap: (Book) -> Void
 
     private var sortedBooks: [Book] {
-        (shelf.books ?? []).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        shelf.bookList.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
     private var bookCount: Int {
@@ -186,14 +241,14 @@ struct LendingShelfSectionView: View {
 // MARK: - Regular Shelf Section
 
 struct ShelfSectionView: View {
-    let shelf: Shelf
+    @ObservedObject var shelf: Shelf
     let onBookTap: (Book) -> Void
     let onDeleteShelf: () -> Void
 
     @State private var showingDeleteConfirmation = false
 
     private var sortedBooks: [Book] {
-        (shelf.books ?? []).sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        shelf.bookList.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
     private var bookCount: Int {
@@ -260,7 +315,7 @@ struct ShelfSectionView: View {
 }
 
 struct BookCardView: View {
-    let book: Book
+    @ObservedObject var book: Book
     let onTap: () -> Void
 
     var body: some View {
@@ -295,5 +350,6 @@ struct BookCardView: View {
 
 #Preview {
     LibraryTabView()
-        .modelContainer(for: [Book.self, Shelf.self], inMemory: true)
+        .environment(\.managedObjectContext, PersistenceController.preview.viewContext)
+        .environmentObject(PersistenceController.preview)
 }

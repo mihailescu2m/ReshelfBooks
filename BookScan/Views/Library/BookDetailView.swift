@@ -6,12 +6,11 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct BookDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @Bindable var book: Book
+    @ObservedObject var book: Book
     let shelves: [Shelf]
 
     var body: some View {
@@ -33,21 +32,19 @@ struct BookDetailView: View {
 }
 
 #Preview {
-    let config = ModelConfiguration(isStoredInMemoryOnly: true)
-    let container = try! ModelContainer(for: Book.self, Shelf.self, configurations: config)
-
-    let shelf = Shelf(name: "Fiction", sortOrder: 0)
-    container.mainContext.insert(shelf)
-
-    let book = Book(
+    let persistence = PersistenceController.preview
+    let shelf = persistence.makeShelf(name: "Fiction")
+    let book = persistence.makeBook(
         isbn: "9780141439518",
         title: "Pride and Prejudice",
         author: "Jane Austen",
         yearPublished: "1813",
+        coverImageURL: nil,
         shelf: shelf
     )
-    container.mainContext.insert(book)
+    persistence.save()
 
     return BookDetailView(book: book, shelves: [shelf])
-        .modelContainer(container)
+        .environment(\.managedObjectContext, persistence.viewContext)
+        .environmentObject(persistence)
 }
