@@ -232,9 +232,12 @@ final class PersistenceController: ObservableObject {
         if isLendingShelf {
             shelf.sortOrder = Int64.max
         } else {
-            // Sort after existing *regular* shelves (lending shelf excluded → no off-by-one).
-            let existingRegular = (library?.shelves ?? []).filter { !$0.isLendingShelf }.count
-            shelf.sortOrder = Int64(existingRegular)
+            // Sort after every existing regular shelf. Counted globally (not just the
+            // active library's shelves) to match the Library view's global ordering,
+            // so the new shelf reliably lands last even when orphan shelves exist.
+            let regularShelfCount = ((try? viewContext.fetch(Shelf.fetchRequestAll())) ?? [])
+                .filter { !$0.isLendingShelf }.count
+            shelf.sortOrder = Int64(regularShelfCount)
         }
         shelf.library = library
         return shelf
@@ -266,12 +269,25 @@ final class PersistenceController: ObservableObject {
         return book
     }
 
-    /// The lending shelf for the active library, creating it lazily if asked.
+    /// The lending shelf, creating it lazily if asked.
+    ///
+    /// Resolves against ALL shelves (not just the active library's) so it matches the
+    /// Library view's global `lendingShelf` accessor. If it only checked the active
+    /// library, an orphan lending shelf — e.g. one migrated from the old schema with no
+    /// `library` — would be displayed while a brand-new one got created here, and the
+    /// lent book would land on a shelf the UI never shows.
     @discardableResult
     func lendingShelf(creatingIfNeeded: Bool) -> Shelf? {
-        let library = activeLibrary(creatingIfNeeded: creatingIfNeeded)
-        let shelves = Array(library?.shelves ?? [])
-        if let existing = shelves.lendingShelf { return existing }
+        let allShelves = (try? viewContext.fetch(Shelf.fetchRequestAll())) ?? []
+        if let existing = allShelves.lendingShelf {
+            // Adopt an orphan lending shelf into the active library (same store only).
+            if existing.library == nil,
+               let library = activeLibrary(creatingIfNeeded: true),
+               library.objectID.persistentStore === existing.objectID.persistentStore {
+                existing.library = library
+            }
+            return existing
+        }
         guard creatingIfNeeded else { return nil }
         return makeShelf(name: "Lent", isLendingShelf: true)
     }
@@ -296,44 +312,71 @@ final class PersistenceController: ObservableObject {
     /// Owner-only structural cleanup. Participants never run this, so there is no
     /// multi-writer delete race: only the owner's device merges duplicates.
     func bootstrap() {
-        guard let active = activeLibrary(creatingIfNeeded: false) else { return }
-        // Only the owner (data in the private store) performs structural maintenance.
-        guard active.objectID.persistentStore === privateStore else {
+        // Participants (preferred library lives in the shared store) do no structural
+        // maintenance — that avoids any multi-writer delete race on shared data.
+        if let active = activeLibrary(creatingIfNeeded: false),
+           active.objectID.persistentStore === sharedStore {
+            refreshSharedState()
+            return
+        }
+        guard let privateStore else { refreshSharedState(); return }
+
+        let privateLibraries = ((try? viewContext.fetch(Library.fetchRequestAll())) ?? [])
+            .filter { $0.objectID.persistentStore === privateStore }
+            .sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+        let privateShelves = ((try? viewContext.fetch(Shelf.fetchRequestAll())) ?? [])
+            .filter { $0.objectID.persistentStore === privateStore }
+        let privateBooks = ((try? viewContext.fetch(Book.fetchRequestAll())) ?? [])
+            .filter { $0.objectID.persistentStore === privateStore }
+
+        // Nothing of our own to maintain.
+        guard !privateLibraries.isEmpty || !privateShelves.isEmpty || !privateBooks.isEmpty else {
             refreshSharedState()
             return
         }
 
-        // 1. Merge any duplicate *private* libraries (two owner devices can each create
-        //    one before the first sync) into the canonical earliest-created library.
-        let ownedLibraries = ((try? viewContext.fetch(Library.fetchRequestAll())) ?? [])
-            .filter { $0.objectID.persistentStore === privateStore }
-            .sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
-
-        if let canonicalLibrary = ownedLibraries.first, ownedLibraries.count > 1 {
-            for duplicate in ownedLibraries where duplicate !== canonicalLibrary {
-                for shelf in Array(duplicate.shelves ?? []) { shelf.library = canonicalLibrary }
-                for book in Array(duplicate.books ?? []) { book.library = canonicalLibrary }
-                viewContext.delete(duplicate)
-            }
+        // Canonical library: the earliest existing one, or a fresh one created to own
+        // orphaned data (e.g. records migrated from the old schema, which have no library).
+        let canonical: Library
+        if let first = privateLibraries.first {
+            canonical = first
+        } else {
+            canonical = insert("Library") as! Library
+            viewContext.assign(canonical, to: privateStore)
+            try? viewContext.obtainPermanentIDs(for: [canonical])
+            canonical.createdAt = Date()
         }
 
-        // 2. Within the canonical library, collapse duplicate lending shelves.
-        let canonical = ownedLibraries.first ?? active
-        let lendingShelves = Array(canonical.shelves ?? []).filter { $0.isLendingShelf }
-        if lendingShelves.count > 1,
-           let keep = lendingShelves.min(by: { ($0.dateCreated ?? .distantFuture) < ($1.dateCreated ?? .distantFuture) }) {
-            for duplicate in lendingShelves where duplicate !== keep {
+        // 1. Merge any duplicate libraries (two owner devices can each create one before
+        //    the first sync) into the canonical library.
+        for duplicate in privateLibraries where duplicate !== canonical {
+            for shelf in Array(duplicate.shelves ?? []) { shelf.library = canonical }
+            for book in Array(duplicate.books ?? []) { book.library = canonical }
+            viewContext.delete(duplicate)
+        }
+
+        // 2. Adopt orphans (no library) into the canonical library. Without this they
+        //    display fine (the views fetch globally) but are NOT reachable from the
+        //    Library root, so they'd be silently excluded when the library is shared.
+        for shelf in privateShelves where shelf.library == nil { shelf.library = canonical }
+        for book in privateBooks where book.library == nil { book.library = canonical }
+
+        // 3. Collapse ALL lending shelves into one canonical lending shelf (global, so
+        //    a migrated orphan lending shelf doesn't shadow the real one in the UI).
+        let lendingShelves = privateShelves
+            .filter { $0.isLendingShelf }
+            .sorted { ($0.dateCreated ?? .distantFuture) < ($1.dateCreated ?? .distantFuture) }
+        if let keep = lendingShelves.first {
+            for duplicate in lendingShelves.dropFirst() {
                 for book in Array(duplicate.books ?? []) { book.shelf = keep }
                 for book in Array(duplicate.previousBooks ?? []) { book.previousShelf = keep }
                 viewContext.delete(duplicate)
             }
         }
 
-        // NOTE: we deliberately do NOT auto-merge same-ISBN books. The structural
-        // singletons above (library, lending shelf) are safe to dedup, but two Book
-        // records with the same ISBN may be intentional (a user owning two copies),
-        // so silently deleting one would be data loss. A concurrent-scan duplicate is
-        // rare, harmless, and visible — the user can delete it manually.
+        // NOTE: we deliberately do NOT auto-merge same-ISBN books. Two Book records with
+        // the same ISBN may be intentional (a user owning two copies), so silently
+        // deleting one would be data loss; a concurrent-scan duplicate is rare and visible.
 
         save()
         refreshSharedState()
