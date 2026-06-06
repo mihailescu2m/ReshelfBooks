@@ -51,7 +51,7 @@ If BookScan saves you time or you just find it useful, a small donation is great
 ### Scanning & Lookup
 - **Instant barcode scanning** — point the camera at an EAN-13 / ISBN-13 barcode and the book is identified in under a second
 - **Manual ISBN entry** — type any ISBN-10 or ISBN-13 (with full check-digit validation) when a barcode is too worn to scan
-- **Five-source lookup engine** — queries Open Library → Google Books → Open Library search → Crossref → Library of Congress in sequence; each covers a different sweet spot (classics & library-catalogued, popular modern, contemporary popular fiction & non-fiction, academic & textbooks, niche US-published & children's) so almost every book is found
+- **Five-source lookup engine** — Open Library and Google Books are tried first; if both miss, three more sources (Open Library's search index, Crossref, and the Library of Congress) are queried in parallel and the highest-priority match wins. Each covers a different sweet spot (classics & library-catalogued, popular modern, contemporary popular fiction & non-fiction, academic & textbooks, niche US-published & children's) so almost every book is found
 - **Rich cover art** — searches eight sources concurrently (Open Library, Google Books ×3, WorldCat, Bookcover API, Better World Books, and Open Library search) and picks the best available image
 
 ### Library Management
@@ -88,7 +88,7 @@ If BookScan saves you time or you just find it useful, a small donation is great
 | Cloud sync & sharing | CloudKit (private + shared databases, `CKShare`) |
 | Camera / scanning | AVFoundation (`AVCaptureSession`, EAN-13) |
 | Image picking | PhotosUI (`PHPickerViewController`) |
-| Book metadata | Open Library API, Google Books API |
+| Book metadata | Open Library, Google Books, Crossref, Library of Congress |
 | Cover images | Open Library Covers, Google Books, WorldCat, Bookcover API, Better World Books |
 | Concurrency | Swift Structured Concurrency (`async/await`, `actor`, `async let`) |
 | Logging | `os.log` (unified logging) |
@@ -154,9 +154,10 @@ BookScan/
 ├── Views/
 │   ├── Components/
 │   │   ├── CoverImage.swift         — UIImage resize/normalise pipeline
+│   │   ├── DismissWhenDeleted.swift — Dismisses a view when its object is remotely deleted
 │   │   ├── ImagePicker.swift        — Camera & photo library pickers
 │   │   ├── NewShelfAlert.swift      — Reusable "New Shelf" alert modifier
-│   │   ├── CloudSharingView.swift   — UICloudSharingController wrapper (invite / manage / leave)
+│   │   ├── SharingPresenter.swift   — Presents UICloudSharingController (invite / manage / leave)
 │   │   └── WebCoverSearchView.swift — Web cover image grid picker
 │   ├── Library/
 │   │   ├── LibraryTabView.swift     — Main library with shelf sections + share button

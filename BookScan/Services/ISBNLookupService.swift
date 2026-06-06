@@ -47,11 +47,17 @@ actor ISBNLookupService {
 
     private init() {}
 
+    /// A descriptive User-Agent for APIs that ask callers to identify themselves
+    /// (e.g. Crossref's "polite pool"). The version is read from the app bundle so it
+    /// stays in step with the marketing version instead of going stale.
+    private var userAgent: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        return "BookScan/\(version) (mailto:mihailescu2m@gmail.com)"
+    }
+
     // MARK: - Public API
 
-    /// Main lookup function — tries five sources in order, stopping at the first hit.
-    ///
-    /// Each source covers a different sweet spot:
+    /// Main lookup function. Tries five sources, each covering a different sweet spot:
     /// - Open Library (catalog API): classics, public-domain, library-catalogued, older titles
     /// - Google Books: modern popular / English-language titles
     /// - Open Library (search index): contemporary popular fiction & non-fiction — backed by
@@ -60,35 +66,41 @@ actor ISBNLookupService {
     /// - Crossref: academic, scientific, textbooks, university press (Springer, OUP, etc.)
     /// - Library of Congress: niche US-published books, regional publishers, children's
     ///   books, cookbooks, official publications — anything with a US legal deposit record
+    ///
+    /// The two primary sources are tried sequentially so the common case stays cheap
+    /// (one or two round-trips, stopping at the first hit). If both miss, the three
+    /// fallbacks are fanned out **concurrently** — so a hard-to-find book doesn't pay
+    /// three sequential round-trips — while still honouring priority order: we await the
+    /// results highest-priority-first and return the first hit.
     func lookupBook(isbn: String) async throws -> BookMetadata {
         let cleanISBN = ISBNValidator.normalize(isbn)
 
-        // Try Open Library catalog API first
+        // Primary 1: Open Library catalog API.
         if let result = try? await lookupFromOpenLibrary(isbn: cleanISBN) {
             return await ensureCoverImage(for: result)
         }
 
-        // Fallback to Google Books
+        // Primary 2: Google Books.
         if let result = try? await lookupFromGoogleBooks(isbn: cleanISBN) {
             return await ensureCoverImage(for: result)
         }
 
-        // Second fallback: Open Library search index — a different backend than the catalog
-        // API above, with strong coverage of contemporary popular fiction & non-fiction that
-        // the catalog call (and sometimes Google Books) misses.
-        if let result = try? await lookupFromOpenLibrarySearch(isbn: cleanISBN) {
+        // Both primaries missed — fan the three fallbacks out concurrently. The actor
+        // suspends at each URLSession await, so the three requests genuinely overlap.
+        // (Any child task we don't read is cancelled automatically when this scope exits.)
+        async let openLibrarySearch = lookupFromOpenLibrarySearch(isbn: cleanISBN)
+        async let crossref          = lookupFromCrossref(isbn: cleanISBN)
+        async let libraryOfCongress = lookupFromLibraryOfCongress(isbn: cleanISBN)
+
+        // Await in priority order and return the first hit (stop-at-first-hit semantics,
+        // just with the network work already running in parallel).
+        if let result = try? await openLibrarySearch {
             return await ensureCoverImage(for: result)
         }
-
-        // Third fallback: Crossref — strongest coverage for academic and technical books
-        // that the consumer-facing sources commonly miss.
-        if let result = try? await lookupFromCrossref(isbn: cleanISBN) {
+        if let result = try? await crossref {
             return await ensureCoverImage(for: result)
         }
-
-        // Fourth fallback: Library of Congress — niche US publications, regional titles,
-        // children's books, and official publications not well covered elsewhere.
-        if let result = try? await lookupFromLibraryOfCongress(isbn: cleanISBN) {
+        if let result = try? await libraryOfCongress {
             return await ensureCoverImage(for: result)
         }
 
@@ -330,7 +342,7 @@ actor ISBNLookupService {
         }
 
         var request = URLRequest(url: url)
-        request.setValue("BookScan/1.3 (mailto:mihailescu2m@gmail.com)", forHTTPHeaderField: "User-Agent")
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
