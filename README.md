@@ -5,7 +5,7 @@
 <h1 align="center">BookScan</h1>
 
 <p align="center">
-  A native iOS app for scanning, cataloguing, and lending your personal book collection — with iCloud sync across all your devices.
+  A native iOS app for scanning, organising, and lending your personal book collection — with iCloud sync across all your devices.
 </p>
 
 <p align="center">
@@ -20,15 +20,21 @@
 
 ## What is BookScan?
 
-BookScan turns your iPhone or iPad into a personal library cataloguer. Point the camera at any book's barcode and the app instantly looks up the title, author, year, and cover art — no typing required. Your entire library lives in iCloud, so it stays in sync across every device you own.
+BookScan is built around one simple idea: **your physical shelves are the source of truth, and your phone is the guide.**
 
-**Use cases:**
+Scan a book's barcode and the app instantly retrieves the title, author, year, and cover art. Assign the book to a named shelf — *"Living Room Top Row"*, *"Office Left"*, *"Kids Room"* — and BookScan remembers exactly where it lives. From that point on, any time a book ends up out of place, a single scan tells you where it belongs.
 
-- 📚 Cataloguing a home library, office bookshelf, or classroom collection
-- 🔍 Quickly checking whether you already own a book before buying it
-- 🤝 Tracking books you have lent to friends and family
-- 📖 Organising books into named shelves (Fiction, Non-Fiction, To-Read, etc.)
-- 🔎 Searching your collection by title, author, or ISBN at any time
+**The day-to-day workflow:**
+
+📚 **Building your library** — Walk your shelves once and scan everything in. Each book gets assigned to its shelf in the app, creating a complete map of your physical collection. No typing, no manual entry.
+
+📍 **Putting books back** — Pulled a book out and not sure where it came from? Scan the barcode. The app instantly shows you the exact shelf to return it to. No more wandering around trying to remember where it lives.
+
+🖥 **Always-on library assistant** — Leave an old iPad propped up on your bookshelf running BookScan full screen. It stays ready to scan at a moment's notice — no unlocking, no navigating. Just point and scan.
+
+👧 **When kids rearrange your shelves** — Children pull books out constantly and rarely put them back in the right place. A quick scan on each displaced book tells you exactly where it belongs, turning a frustrating re-sort into a two-second job per book.
+
+🤝 **Lending tracker** — Lend a book to someone with one tap. When they return it, scan the barcode: BookScan automatically clears the lent status and shows you which shelf to put it back on. If you can scan it, you have it back — it's that simple.
 
 ---
 
@@ -38,7 +44,7 @@ BookScan turns your iPhone or iPad into a personal library cataloguer. Point the
 - **Instant barcode scanning** — point the camera at an EAN-13 / ISBN-13 barcode and the book is identified in under a second
 - **Manual ISBN entry** — type any ISBN-10 or ISBN-13 (with full check-digit validation) when a barcode is too worn to scan
 - **Dual lookup engine** — queries Open Library first, then Google Books as a fallback, so almost every book is found
-- **Rich cover art** — searches seven sources concurrently (Open Library, Google Books ×3, Bookcover API, Better World Books, and an Open Library search) and picks the best available image
+- **Rich cover art** — searches eight sources concurrently (Open Library, Google Books ×3, WorldCat, Bookcover API, Better World Books, and Open Library search) and picks the best available image
 
 ### Library Management
 - **Named shelves** — organise books into as many shelves as you like; drag between shelves at any time
@@ -95,7 +101,7 @@ BookScan turns your iPhone or iPad into a personal library cataloguer. Point the
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/<your-username>/BookScan.git
+   git clone https://github.com/mihailescu2m/BookScan.git
    cd BookScan/BookScan
    ```
 
@@ -178,7 +184,7 @@ BookScan uses the following free, open APIs — no API keys required:
 | [Bookcover API](https://bookcover.longitood.com) | Cover images by ISBN |
 | [Better World Books](https://www.betterworldbooks.com) | Cover images by ISBN |
 
-All seven cover-image sources run **concurrently** and results are assembled in priority order, so the app shows the best available cover without waiting for slower sources.
+All eight cover-image sources run **concurrently** and results are assembled in priority order, so the app shows the best available cover without waiting for slower sources.
 
 ---
 
@@ -200,11 +206,7 @@ Please make sure existing tests pass and add new tests for any new logic.
 
 If BookScan saves you time or you just find it useful, a small donation is greatly appreciated and helps fund continued development.
 
-<p align="center">
-  <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mihailescu2m%40gmail%2Ecom&lc=AU&item_name=memeka&item_number=odroid&currency_code=AUD&bn=PP%2DDonationsBF%3Abtn_donate_LG%2Egif%3ANonHosted">
-    <img src="https://www.paypalobjects.com/en_AU/i/btn/btn_donate_LG.gif" alt="Donate with PayPal" />
-  </a>
-</p>
+[![Donate with PayPal](https://www.paypalobjects.com/en_AU/i/btn/btn_donate_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mihailescu2m%40gmail%2Ecom&lc=AU&item_name=memeka&item_number=odroid&currency_code=AUD&bn=PP%2DDonationsBF%3Abtn_donate_LG%2Egif%3ANonHosted)
 
 ---
 
