@@ -78,35 +78,50 @@ struct LibraryTabView: View {
 
     /// Opens the family-sharing sheet. Resolves (creating if needed) the library and
     /// its share when invoked, so we never create objects as a side effect of rendering.
-    private func presentSharing() {
+    ///
+    /// - Parameter retryCount: Internal retry depth — callers always use the default (0).
+    private func presentSharing(retryCount: Int = 0) {
         // Guard against a double-tap kicking off a second container.share() before the
         // first finishes — that would create a duplicate share zone.
         guard !isPreparingShare else { return }
         guard let library = persistence.activeLibrary(creatingIfNeeded: true) else { return }
         isPreparingShare = true
 
-        // Verify CloudKit account status BEFORE attempting to create the share.
+        // Check CloudKit account status before attempting to create the share.
         //
-        // Why: the very first call to a CKContainer performs a network round-trip to
-        // fetch the auth token. If container.share() races against that handshake it
-        // can fail with CKError.notAuthenticated even though the user IS signed in,
-        // which would show a misleading "sign in to iCloud" alert. By checking status
-        // first (the result is cached after bootstrap's pre-warm) we either:
-        //   a) get an instant .available → proceed with confidence, or
-        //   b) surface a genuine "not signed in" early with a correct error message.
+        // On first launch (especially from TestFlight / a fresh install in the Production
+        // CloudKit environment), both accountStatus and container.share() can transiently
+        // fail with CKError.notAuthenticated even when the user IS signed in — the auth
+        // token simply hasn't been fetched yet. bootstrap() fires a pre-warm, but if the
+        // user taps Share before that completes we'd show a spurious "sign in" alert.
+        //
+        // Strategy: if either check fails on the first attempt, retry once silently after
+        // a short delay (giving CloudKit time to finish its handshake). Only surface the
+        // "Sharing Unavailable" alert on a second consecutive failure, which indicates a
+        // genuine problem (actually not signed in, no network, etc.).
         persistence.ckContainer.accountStatus { status, _ in
             DispatchQueue.main.async {
                 guard status == .available else {
                     isPreparingShare = false
-                    shareUnavailable = true
+                    if retryCount == 0 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            presentSharing(retryCount: 1)
+                        }
+                    } else {
+                        shareUnavailable = true
+                    }
                     return
                 }
                 persistence.prepareShare(for: library) { share in
                     isPreparingShare = false
                     guard let share else {
-                        // Share couldn't be created even with a confirmed account —
-                        // some other CloudKit error (network loss, quota, etc.).
-                        shareUnavailable = true
+                        if retryCount == 0 {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                presentSharing(retryCount: 1)
+                            }
+                        } else {
+                            shareUnavailable = true
+                        }
                         return
                     }
                     SharingPresenter.present(
