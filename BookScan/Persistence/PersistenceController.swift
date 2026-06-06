@@ -48,7 +48,10 @@ final class PersistenceController: ObservableObject {
     @Published var joinBlockedReason: String?
 
     var viewContext: NSManagedObjectContext { container.viewContext }
-    var ckContainer: CKContainer { CKContainer(identifier: Self.containerID) }
+    // Stored lazily so `eraseAllDataIfRequested()` (called in init) and the sharing
+    // flow share the same `CKContainer` instance rather than allocating a new one on
+    // every call site.
+    lazy var ckContainer: CKContainer = CKContainer(identifier: Self.containerID)
 
     private let inMemory: Bool
 
@@ -127,6 +130,12 @@ final class PersistenceController: ObservableObject {
         // a CloudKit setup error), fall back to an in-memory store so the app still
         // launches and is usable rather than silently unable to create or persist
         // anything. Data won't persist in this degraded mode, but the app works.
+        //
+        // NOTE: `loadPersistentStores` for SQLite invokes its handler synchronously
+        // (Apple's documented behaviour for on-disk stores), so `privateStore` is
+        // guaranteed to be populated before we reach this check. If that assumption ever
+        // breaks (async handler delivery), the fallback simply creates an extra in-memory
+        // store, which is harmless but unnecessary.
         if !inMemory, privateStore == nil {
             logger.warning("Private store unavailable; falling back to an in-memory store")
             privateStore = try? container.persistentStoreCoordinator.addPersistentStore(
@@ -307,15 +316,24 @@ final class PersistenceController: ObservableObject {
 
     /// The lending shelf, creating it lazily if asked.
     ///
-    /// Resolves against ALL shelves (not just the active library's) so it matches the
-    /// Library view's global `lendingShelf` accessor. If it only checked the active
-    /// library, an orphan lending shelf — e.g. one migrated from the old schema with no
-    /// `library` — would be displayed while a brand-new one got created here, and the
-    /// lent book would land on a shelf the UI never shows.
+    /// Resolves to the lending shelf that lives in the **same persistent store** as
+    /// the active library. A shelf from a different store must never be returned:
+    /// setting `book.shelf = foreignStoreLendingShelf` creates a cross-store
+    /// relationship that Core Data forbids, causing every subsequent `save()` to
+    /// throw and leaving the context in a permanently dirty state.
+    ///
+    /// We still fetch globally (both stores) so that an orphan lending shelf
+    /// migrated from the old schema — which has `library == nil` — is found and
+    /// adopted. But we only return one whose store matches the active library.
     @discardableResult
     func lendingShelf(creatingIfNeeded: Bool) -> Shelf? {
         let allShelves = (try? viewContext.fetch(Shelf.fetchRequestAll())) ?? []
-        if let existing = allShelves.lendingShelf {
+        // Determine which store the active library lives in; fall back to private.
+        let activeStore = activeLibrary(creatingIfNeeded: false).flatMap { store(for: $0) } ?? privateStore
+
+        // Prefer a lending shelf in the same store as the active library.
+        let candidateShelves = allShelves.filter { $0.objectID.persistentStore === activeStore }
+        if let existing = candidateShelves.lendingShelf {
             // Adopt an orphan lending shelf into the active library (same store only).
             if existing.library == nil,
                let library = activeLibrary(creatingIfNeeded: true),
@@ -324,6 +342,7 @@ final class PersistenceController: ObservableObject {
             }
             return existing
         }
+        // No lending shelf in the active library's store — create one there.
         guard creatingIfNeeded else { return nil }
         return makeShelf(name: "Lent", isLendingShelf: true)
     }
@@ -340,6 +359,9 @@ final class PersistenceController: ObservableObject {
             try viewContext.save()
         } catch {
             logger.error("Save failed: \(error.localizedDescription)")
+            // Roll back so invalid changes (e.g. a cross-store relationship) don't
+            // accumulate in the context and cause every subsequent save to fail too.
+            viewContext.rollback()
         }
     }
 
@@ -428,17 +450,6 @@ final class PersistenceController: ObservableObject {
     /// True when the current user owns the library (their data is in the private store).
     func isOwner(_ library: Library) -> Bool {
         library.objectID.persistentStore === privateStore
-    }
-
-    func isShared(_ library: Library) -> Bool {
-        // Participant side: the library lives in the shared store, so it's shared by definition.
-        if library.objectID.persistentStore === sharedStore { return true }
-        // Owner side: a share record exists *and* somebody other than the owner is on it.
-        // (An owner who opened the share sheet but invited nobody isn't "shared" yet.)
-        if let share = existingShare(for: library) {
-            return share.participants.count > 1
-        }
-        return false
     }
 
     /// Ensures a `CKShare` exists for the library (creating it if needed), then hands

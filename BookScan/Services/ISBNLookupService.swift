@@ -355,15 +355,32 @@ actor ISBNLookupService {
 
     // MARK: - Bookcover API
 
-    /// Gets cover URL from Bookcover API if valid
+    /// Gets a cover image URL from the Bookcover API.
+    ///
+    /// The endpoint returns a JSON body like `{"url": "https://…/cover.jpg"}`, NOT an
+    /// image directly. Treating the API endpoint as an image URL (via `isValidImageURL`)
+    /// would pass the HEAD/size check (the JSON response is large enough), but then
+    /// `UIImage(data:)` on the downloaded JSON would return nil — silently wasting a
+    /// network round-trip and never yielding a cover. Instead we parse the JSON to get
+    /// the real image URL and validate that.
     private func getBookcoverAPIURL(isbn: String) async -> String? {
-        let coverURL = "https://bookcover.longitood.com/bookcover/\(isbn)"
+        let apiURLString = "https://bookcover.longitood.com/bookcover/\(isbn)"
+        guard let apiURL = URL(string: apiURLString) else { return nil }
 
-        if await isValidImageURL(coverURL) {
-            return coverURL
+        do {
+            let (data, response) = try await URLSession.shared.data(from: apiURL)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let imageURL = json["url"] as? String,
+                  !imageURL.isEmpty else {
+                return nil
+            }
+            return await isValidImageURL(imageURL) ? imageURL : nil
+        } catch {
+            logger.debug("Bookcover API request failed for ISBN \(isbn): \(error.localizedDescription)")
+            return nil
         }
-
-        return nil
     }
 
     // MARK: - Better World Books

@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-iOS%2018%2B-blue?logo=apple" alt="iOS 18+" />
-  <img src="https://img.shields.io/badge/Swift-6-orange?logo=swift" alt="Swift 6" />
+  <img src="https://img.shields.io/badge/Swift-5-orange?logo=swift" alt="Swift 5" />
   <img src="https://img.shields.io/badge/SwiftUI-%2B%20Core%20Data-purple" alt="SwiftUI + Core Data" />
   <img src="https://img.shields.io/badge/CloudKit-iCloud%20Sync-lightgrey?logo=icloud" alt="CloudKit" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" />
@@ -102,7 +102,7 @@ If BookScan saves you time or you just find it useful, a small donation is great
 |---|---|
 | iOS | 18.0 |
 | Xcode | 16.0 |
-| Swift | 6.0 |
+| Swift | 5.0 |
 | iCloud account | Required for sync (app works offline without one) |
 
 ---

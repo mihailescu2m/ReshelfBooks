@@ -51,6 +51,11 @@ enum SharingPresenter {
     final class Coordinator: NSObject, UICloudSharingControllerDelegate, UIAdaptivePresentationControllerDelegate {
         private let persistence: PersistenceController
 
+        /// Set to true whenever the controller saves the share (link sent, permissions
+        /// changed, sharing stopped via the UI). If this is still false when the sheet
+        /// is dismissed, the share was opened but never used — safe to tear it down.
+        private var shareSaved = false
+
         init(persistence: PersistenceController) {
             self.persistence = persistence
         }
@@ -64,16 +69,29 @@ enum SharingPresenter {
         }
 
         func cloudSharingControllerDidSaveShare(_ csc: UICloudSharingController) {
+            // A link was generated or share settings were updated — the share is
+            // intentional, so we must NOT remove it when the sheet is later dismissed.
+            shareSaved = true
             persistence.refreshSharedState()
         }
 
         func cloudSharingControllerDidStopSharing(_ csc: UICloudSharingController) {
+            // Sharing was stopped by the user — mark as saved so the dismiss path
+            // doesn't try to delete an already-removed share.
+            shareSaved = true
             persistence.refreshSharedState()
         }
 
-        // Called when the sheet is swiped/closed without inviting anyone.
+        // Called when the sheet is swiped/closed.
         func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-            persistence.removeUnusedShareIfNeeded()
+            // Only tear down the share if the sheet was dismissed without ever saving it
+            // (the user tapped Share and immediately dismissed without sending a link).
+            // If a link was sent (shareSaved = true) but the recipient hasn't accepted yet,
+            // the share's participant list still shows only the owner — removing it here
+            // would invalidate the link before anyone could accept it.
+            if !shareSaved {
+                persistence.removeUnusedShareIfNeeded()
+            }
             persistence.refreshSharedState()
             SharingPresenter.activeCoordinator = nil
         }

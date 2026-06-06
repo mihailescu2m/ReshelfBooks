@@ -116,11 +116,25 @@ struct LibraryTabView: View {
         }
     }
 
+    /// The lending shelf to display, preferring the one in the same persistent store as
+    /// the active library. This mirrors the store-scoping in
+    /// `PersistenceController.lendingShelf` so the shelf shown in the UI is always the
+    /// same shelf that receives lent books — avoiding a split-brain situation where the
+    /// UI shows a private-store lending shelf (empty) while lent books land on the
+    /// shared-store one (hidden).
+    private var activeLendingShelf: Shelf? {
+        let activeStore = persistence.activeLibrary(creatingIfNeeded: false)?.objectID.persistentStore
+        let preferred = shelves
+            .filter { $0.isLendingShelf && (activeStore == nil || $0.objectID.persistentStore === activeStore) }
+            .min { ($0.dateCreated ?? .distantFuture) < ($1.dateCreated ?? .distantFuture) }
+        return preferred ?? shelves.lendingShelf   // fallback: no store info yet
+    }
+
     private var libraryContentView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
                 // Lending shelf at the top if it has books
-                if let lendingShelf = shelves.lendingShelf, !(lendingShelf.books ?? []).isEmpty {
+                if let lendingShelf = activeLendingShelf, !(lendingShelf.books ?? []).isEmpty {
                     LendingShelfSectionView(
                         shelf: lendingShelf,
                         onBookTap: { book in

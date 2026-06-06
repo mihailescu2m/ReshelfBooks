@@ -37,7 +37,7 @@ extension UIImage {
 /// Helpers for turning arbitrary image bytes into normalized cover-image data.
 enum CoverImage {
     /// Cap on a cover's longest edge. Covers display at most ~225pt (≈675px @3x),
-    /// so 600px keeps quality while bounding the size stored in SwiftData/CloudKit.
+    /// so 600px keeps quality while bounding the size stored in Core Data/CloudKit.
     static let maxDimension: CGFloat = 600
     static let compressionQuality: CGFloat = 0.8
 
