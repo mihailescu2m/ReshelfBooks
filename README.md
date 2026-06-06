@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-iOS%2018%2B-blue?logo=apple" alt="iOS 18+" />
   <img src="https://img.shields.io/badge/Swift-6-orange?logo=swift" alt="Swift 6" />
-  <img src="https://img.shields.io/badge/SwiftUI-%2B%20SwiftData-purple" alt="SwiftUI + SwiftData" />
+  <img src="https://img.shields.io/badge/SwiftUI-%2B%20Core%20Data-purple" alt="SwiftUI + Core Data" />
   <img src="https://img.shields.io/badge/CloudKit-iCloud%20Sync-lightgrey?logo=icloud" alt="CloudKit" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License" />
 </p>
@@ -20,21 +20,29 @@
 
 ## What is BookScan?
 
-BookScan is built around one simple idea: **your physical shelves are the source of truth, and your phone is the guide.**
+BookScan is the app that remembers every book's place on your library's shelves — so any book can find its way back with a single scan.
 
 Scan a book's barcode and the app instantly retrieves the title, author, year, and cover art. Assign the book to a named shelf — *"Living Room Top Row"*, *"Office Left"*, *"Kids Room"* — and BookScan remembers exactly where it lives. From that point on, any time a book ends up out of place, a single scan tells you where it belongs.
 
-**The day-to-day workflow:**
+**The day-to-day usage:**
 
-📚 **Building your library** — Walk your shelves once and scan everything in. Each book gets assigned to its shelf in the app, creating a complete map of your physical collection. No typing, no manual entry.
+📚 **Building your library** — Walk to your shelves once and scan everything in. Each book gets assigned to its shelf in the app, creating a complete map of your physical library. No typing, no manual entry.
 
 📍 **Putting books back** — Pulled a book out and not sure where it came from? Scan the barcode. The app instantly shows you the exact shelf to return it to. No more wandering around trying to remember where it lives.
 
 🖥 **Always-on library assistant** — Leave an old iPad propped up on your bookshelf running BookScan full screen. It stays ready to scan at a moment's notice — no unlocking, no navigating. Just point and scan.
 
-👧 **When kids rearrange your shelves** — Children pull books out constantly and rarely put them back in the right place. A quick scan on each displaced book tells you exactly where it belongs, turning a frustrating re-sort into a two-second job per book.
+👧 **When kids rearrange your shelves** — Children pull books out constantly and rarely put them back in the right place. A quick scan on each displaced book tells you exactly where it belongs, turning a frustrating re-sort into a two-second job.
 
 🤝 **Lending tracker** — Lend a book to someone with one tap. When they return it, scan the barcode: BookScan automatically clears the lent status and shows you which shelf to put it back on. If you can scan it, you have it back — it's that simple.
+
+---
+
+## Support the Project
+
+If BookScan saves you time or you just find it useful, a small donation is greatly appreciated and helps fund continued development.
+
+[![Donate with PayPal](https://www.paypalobjects.com/en_AU/i/btn/btn_donate_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mihailescu2m%40gmail%2Ecom&lc=AU&item_name=memeka&item_number=odroid&currency_code=AUD&bn=PP%2DDonationsBF%3Abtn_donate_LG%2Egif%3ANonHosted)
 
 ---
 
@@ -57,9 +65,11 @@ Scan a book's barcode and the app instantly retrieves the title, author, year, a
 - **Return via barcode** — scanning a lent book's barcode automatically returns it to its original shelf; a confirmation screen shows where to put it back
 - **Scan-to-return flow** — the scanner recognises lent books and triggers the return action immediately, no menus required
 
-### iCloud Sync
-- **CloudKit private database** — your library syncs silently across iPhone and iPad via your private iCloud container
-- **Conflict-safe** — launch-time merge logic deduplicates any *Lent* shelf copies that a CloudKit sync race might create, keeping your data consistent
+### Sync & Family Sharing
+- **iCloud sync** — your library syncs silently across all your own devices via your private iCloud container
+- **Family sharing** — share your whole library, read/write, with family (partner, kids): tap the share button, send an invite, and everyone sees and edits the same live library
+- **Merged, equal access** — every member can scan, shelve, lend, and return; changes appear on the other devices within seconds
+- **Conflict-safe** — owner-side maintenance and deterministic merge logic keep the shared library consistent under concurrent edits
 
 ### Privacy
 - No tracking, no analytics, no third-party SDKs
@@ -74,12 +84,12 @@ Scan a book's barcode and the app instantly retrieves the title, author, year, a
 | Layer | Technology |
 |---|---|
 | UI | SwiftUI |
-| Data & persistence | SwiftData |
-| Cloud sync | CloudKit (private database) |
+| Data & persistence | Core Data (`NSPersistentCloudKitContainer`) |
+| Cloud sync & sharing | CloudKit (private + shared databases, `CKShare`) |
 | Camera / scanning | AVFoundation (`AVCaptureSession`, EAN-13) |
 | Image picking | PhotosUI (`PHPickerViewController`) |
 | Book metadata | Open Library API, Google Books API |
-| Cover images | Open Library Covers, Google Books, Bookcover API, Better World Books |
+| Cover images | Open Library Covers, Google Books, WorldCat, Bookcover API, Better World Books |
 | Concurrency | Swift Structured Concurrency (`async/await`, `actor`, `async let`) |
 | Logging | `os.log` (unified logging) |
 | Tests | Swift Testing framework |
@@ -132,8 +142,12 @@ Scan a book's barcode and the app instantly retrieves the title, author, year, a
 ```
 BookScan/
 ├── Models/
-│   ├── Book.swift              — @Model: isbn, title, author, shelf, lend/return logic
-│   └── Shelf.swift             — @Model: name, sortOrder, isLendingShelf
+│   ├── Library.swift           — NSManagedObject: hidden root that owns shelves + books (sharing anchor)
+│   ├── Book.swift              — NSManagedObject: isbn, title, author, shelf, lend/return logic
+│   └── Shelf.swift             — NSManagedObject: name, sortOrder, isLendingShelf
+├── Persistence/
+│   ├── PersistenceController.swift — Core Data + CloudKit stack, private/shared stores, factories, sharing
+│   └── BookScanModel.swift     — programmatic NSManagedObjectModel (CloudKit-compatible)
 ├── Services/
 │   ├── ISBNValidator.swift     — ISBN-10/13 normalisation & check-digit validation
 │   └── ISBNLookupService.swift — actor: metadata lookup + concurrent cover image search
@@ -142,9 +156,10 @@ BookScan/
 │   │   ├── CoverImage.swift         — UIImage resize/normalise pipeline
 │   │   ├── ImagePicker.swift        — Camera & photo library pickers
 │   │   ├── NewShelfAlert.swift      — Reusable "New Shelf" alert modifier
+│   │   ├── CloudSharingView.swift   — UICloudSharingController wrapper (invite / manage / leave)
 │   │   └── WebCoverSearchView.swift — Web cover image grid picker
 │   ├── Library/
-│   │   ├── LibraryTabView.swift     — Main library with shelf sections
+│   │   ├── LibraryTabView.swift     — Main library with shelf sections + share button
 │   │   ├── BookDetailView.swift     — Sheet wrapper for book detail
 │   │   ├── BookDetailContent.swift  — Book info, shelf picker, lend/return/delete
 │   │   └── SearchView.swift         — Full-text search with debounce
@@ -154,7 +169,8 @@ BookScan/
 │       ├── NewBookView.swift            — Confirm & save a newly scanned book
 │       ├── ExistingBookView.swift       — Show location / return a found book
 │       └── ManualISBNEntryView.swift    — Keyboard ISBN entry with live validation
-├── BookScanApp.swift   — App entry point, ModelContainer, lending-shelf dedup
+├── AppDelegate.swift   — Accepts CloudKit share invitations
+├── BookScanApp.swift   — App entry point, persistence injection, owner-only bootstrap
 └── ContentView.swift   — TabView + floating tab bar + search sheet
 ```
 
@@ -163,9 +179,13 @@ BookScan/
 ## Data Model
 
 ```
-Shelf ──< Book (shelf)
-Shelf ──< Book (previousShelf)   ← remembers original shelf while lent
+Library ──< Shelf
+Library ──< Book
+Shelf   ──< Book (shelf)
+Shelf   ──< Book (previousShelf)   ← remembers original shelf while lent
 ```
+
+A single hidden `Library` root owns every shelf and book; sharing that one object moves the whole graph into a shared CloudKit zone, so the entire library is shared (and new items automatically join it).
 
 `Book.lend(to:)` stores `shelf` → `previousShelf` and moves the book to the lending shelf.  
 `Book.returnBook()` restores `shelf = previousShelf` and clears `previousShelf`.
@@ -199,14 +219,6 @@ Bug reports and pull requests are welcome. For major changes please open an issu
 5. Open a pull request
 
 Please make sure existing tests pass and add new tests for any new logic.
-
----
-
-## Support the Project
-
-If BookScan saves you time or you just find it useful, a small donation is greatly appreciated and helps fund continued development.
-
-[![Donate with PayPal](https://www.paypalobjects.com/en_AU/i/btn/btn_donate_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mihailescu2m%40gmail%2Ecom&lc=AU&item_name=memeka&item_number=odroid&currency_code=AUD&bn=PP%2DDonationsBF%3Abtn_donate_LG%2Egif%3ANonHosted)
 
 ---
 
