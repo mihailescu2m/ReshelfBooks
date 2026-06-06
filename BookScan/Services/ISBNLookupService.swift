@@ -49,12 +49,14 @@ actor ISBNLookupService {
 
     // MARK: - Public API
 
-    /// Main lookup function — tries Open Library → Google Books → Crossref in order.
+    /// Main lookup function — tries four sources in order, stopping at the first hit.
     ///
     /// Each source covers a different sweet spot:
     /// - Open Library: classics, public-domain, library-catalogued, older titles
     /// - Google Books: modern popular / English-language titles
     /// - Crossref: academic, scientific, textbooks, university press (Springer, OUP, etc.)
+    /// - Library of Congress: niche US-published books, regional publishers, children's
+    ///   books, cookbooks, official publications — anything with a US legal deposit record
     func lookupBook(isbn: String) async throws -> BookMetadata {
         let cleanISBN = ISBNValidator.normalize(isbn)
 
@@ -71,6 +73,12 @@ actor ISBNLookupService {
         // Second fallback: Crossref — strongest coverage for academic and technical books
         // that the two consumer-facing sources commonly miss.
         if let result = try? await lookupFromCrossref(isbn: cleanISBN) {
+            return await ensureCoverImage(for: result)
+        }
+
+        // Third fallback: Library of Congress — niche US publications, regional titles,
+        // children's books, and official publications not well covered elsewhere.
+        if let result = try? await lookupFromLibraryOfCongress(isbn: cleanISBN) {
             return await ensureCoverImage(for: result)
         }
 
@@ -360,6 +368,81 @@ actor ISBNLookupService {
             yearPublished: yearPublished,
             coverImageURL: nil   // Crossref doesn't serve cover images
         )
+    }
+
+    // MARK: - Library of Congress API
+
+    /// Looks up book metadata from the Library of Congress catalog.
+    ///
+    /// The LOC is the US national library and legal deposit holder for all US publications.
+    /// It fills the gap left by the other three sources: niche non-fiction, regional and
+    /// small-press publishers, children's books, cookbooks, lifestyle titles, and official
+    /// government publications — anything that received a US copyright registration but
+    /// wasn't big enough to appear prominently in Google Books or Open Library.
+    ///
+    /// The `/books/` JSON endpoint performs a keyword search against all catalog fields
+    /// (including ISBN), so the ISBN query reliably targets the matching record.
+    /// Free, no API key. LOC does not serve cover images.
+    private func lookupFromLibraryOfCongress(isbn: String) async throws -> BookMetadata {
+        let encodedISBN = isbn.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? isbn
+        let urlString = "https://www.loc.gov/books/?q=\(encodedISBN)&fo=json&c=1"
+        guard let url = URL(string: urlString) else {
+            throw ISBNLookupError.invalidResponse
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw ISBNLookupError.invalidResponse
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = json["results"] as? [[String: Any]],
+              let first = results.first,
+              let title = first["title"] as? String, !title.isEmpty else {
+            throw ISBNLookupError.notFound
+        }
+
+        // LOC contributor format: "Last, First, 1775-1817" — reformat to "First Last".
+        let author: String
+        if let contributors = first["contributor"] as? [String],
+           let raw = contributors.first {
+            author = reformatLOCContributor(raw)
+        } else {
+            author = "Unknown Author"
+        }
+
+        let yearPublished = extractYear(from: first["date"] as? String)
+
+        return BookMetadata(
+            isbn: isbn,
+            title: title,
+            author: author,
+            yearPublished: yearPublished,
+            coverImageURL: nil   // LOC doesn't serve cover images
+        )
+    }
+
+    /// Converts a LOC authority-file contributor string to a display name.
+    ///
+    /// LOC stores authors in AACR2/RDA authority form: "Last, First, dates"
+    /// (e.g. "Austen, Jane, 1775-1817") or for organisations just "Name".
+    /// We split on ", ", drop any pure-date segments, and reverse the name parts.
+    private func reformatLOCContributor(_ raw: String) -> String {
+        let parts = raw
+            .components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+
+        // Keep only parts that start with a letter (drops "1775-1817", "-2020", etc.).
+        let nameParts = parts.filter { $0.first?.isLetter == true }
+
+        switch nameParts.count {
+        case 0: return parts.first ?? raw     // fallback: return raw string
+        case 1: return nameParts[0]           // single-segment: organisation name
+        default: return "\(nameParts[1]) \(nameParts[0])"  // "First Last"
+        }
     }
 
     // MARK: - Open Library API
