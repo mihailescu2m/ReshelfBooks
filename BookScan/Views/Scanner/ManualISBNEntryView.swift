@@ -72,9 +72,10 @@ struct ManualISBNEntryView: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("978-0-14-143951-8", text: $isbn)
                 .font(.title3)
-                // asciiCapable (not numberPad) so users can type the 'X' check
-                // digit that some ISBN-10s require (e.g. "080442957X").
-                .keyboardType(.asciiCapable)
+                // numbersAndPunctuation (not numberPad) so users can still type
+                // the 'X' check digit that some ISBN-10s require (e.g. "080442957X"),
+                // while keeping numbers on the primary keyboard layout.
+                .keyboardType(.numbersAndPunctuation)
                 .textContentType(.none)
                 .autocorrectionDisabled()
                 .padding()
