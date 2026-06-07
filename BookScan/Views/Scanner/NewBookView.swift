@@ -215,6 +215,7 @@ struct NewBookView: View {
         }
     }
 
+    @MainActor
     private func loadCoverImage() async {
         guard let urlString = metadata.coverImageURL else { return }
 
@@ -224,9 +225,7 @@ struct NewBookView: View {
         do {
             let data = try await ISBNLookupService.shared.downloadCoverImage(from: urlString)
             if let image = UIImage(data: data) {
-                await MainActor.run {
-                    coverImage = image
-                }
+                coverImage = image
             }
         } catch {
             logger.warning("Failed to load cover image for ISBN \(metadata.isbn): \(error.localizedDescription)")

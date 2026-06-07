@@ -157,6 +157,7 @@ struct WebCoverSearchView: View {
 
     // MARK: - Actions
 
+    @MainActor
     private func searchForCovers() async {
         isSearching = true
 
@@ -167,15 +168,14 @@ struct WebCoverSearchView: View {
             maxResults: 6
         )
 
-        await MainActor.run {
-            coverURLs = urls
-            isSearching = false
-        }
+        coverURLs = urls
+        isSearching = false
     }
 
+    @MainActor
     private func loadImage(from url: String) async {
         // Skip if already loaded or a download for this URL is already in flight.
-        // The guard + insert run synchronously on the main actor (no await between
+        // @MainActor guarantees the guard + insert run atomically (no await between
         // them), so two concurrent callers can't both start a download.
         guard loadedImages[url] == nil, !loadingURLs.contains(url) else { return }
         loadingURLs.insert(url)
