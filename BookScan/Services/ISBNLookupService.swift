@@ -45,6 +45,18 @@ actor ISBNLookupService {
     // Minimum image size to be considered valid (filters out placeholder images)
     private let minimumImageSize = 1000
 
+    /// Session with a per-request timeout so a slow or hanging source can't make a
+    /// lookup spin on URLSession's 60s default. The two primary metadata sources are
+    /// tried sequentially, so without this cap two stalled requests could block the
+    /// loading UI for ~2 minutes before the fallbacks even start.
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 12    // max stall per request
+        config.timeoutIntervalForResource = 20   // max time for the whole transfer
+        config.waitsForConnectivity = false      // fail fast when offline, don't queue
+        return URLSession(configuration: config)
+    }()
+
     private init() {}
 
     /// A descriptive User-Agent for APIs that ask callers to identify themselves
@@ -146,7 +158,7 @@ actor ISBNLookupService {
             throw ISBNLookupError.invalidResponse
         }
 
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await session.data(from: url)
 
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
@@ -154,6 +166,33 @@ actor ISBNLookupService {
         }
 
         return data
+    }
+
+    // MARK: - JSON fetching
+
+    /// Fetches `urlString` and decodes the body as a JSON object (`[String: Any]`).
+    /// Throws `ISBNLookupError` on a malformed URL, a non-200 response, or a body that
+    /// isn't a JSON object. `headers` lets a caller add request headers — e.g. the
+    /// User-Agent that opts Crossref's API into its "polite pool".
+    private func fetchJSON(_ urlString: String, headers: [String: String] = [:]) async throws -> [String: Any] {
+        guard let url = URL(string: urlString) else {
+            throw ISBNLookupError.invalidResponse
+        }
+        var request = URLRequest(url: url)
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw ISBNLookupError.invalidResponse
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ISBNLookupError.decodingError
+        }
+        return json
     }
 
     // MARK: - Cover Image Helpers
@@ -227,7 +266,7 @@ actor ISBNLookupService {
         request.httpMethod = "HEAD"
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (_, response) = try await session.data(for: request)
             if let httpResponse = response as? HTTPURLResponse,
                httpResponse.statusCode == 200,
                let contentLength = httpResponse.value(forHTTPHeaderField: "Content-Length"),
@@ -249,42 +288,18 @@ actor ISBNLookupService {
         let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "https://www.googleapis.com/books/v1/volumes?q=\(encodedQuery)&maxResults=\(maxResults)"
 
-        guard let url = URL(string: urlString) else { return [] }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let items = json["items"] as? [[String: Any]] else {
-                return []
-            }
-
-            return items.compactMap { extractCoverURL(from: $0) }
-        } catch {
-            logger.error("Google Books search failed for query '\(query)': \(error.localizedDescription)")
+        guard let json = try? await fetchJSON(urlString),
+              let items = json["items"] as? [[String: Any]] else {
             return []
         }
+        return items.compactMap { extractCoverURL(from: $0) }
     }
 
     /// Looks up book metadata from Google Books API
     private func lookupFromGoogleBooks(isbn: String) async throws -> BookMetadata {
-        let urlString = "https://www.googleapis.com/books/v1/volumes?q=isbn:\(isbn)"
+        let json = try await fetchJSON("https://www.googleapis.com/books/v1/volumes?q=isbn:\(isbn)")
 
-        guard let url = URL(string: urlString) else {
-            throw ISBNLookupError.invalidResponse
-        }
-
-        let (data, response) = try await URLSession.shared.data(from: url)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ISBNLookupError.invalidResponse
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let items = json["items"] as? [[String: Any]],
+        guard let items = json["items"] as? [[String: Any]],
               let firstItem = items.first,
               let volumeInfo = firstItem["volumeInfo"] as? [String: Any] else {
             throw ISBNLookupError.notFound
@@ -336,23 +351,12 @@ actor ISBNLookupService {
     ///
     /// Crossref does not serve cover images; cover sources are handled separately.
     private func lookupFromCrossref(isbn: String) async throws -> BookMetadata {
-        let urlString = "https://api.crossref.org/works?filter=isbn:\(isbn)&rows=1"
-        guard let url = URL(string: urlString) else {
-            throw ISBNLookupError.invalidResponse
-        }
+        let json = try await fetchJSON(
+            "https://api.crossref.org/works?filter=isbn:\(isbn)&rows=1",
+            headers: ["User-Agent": userAgent]
+        )
 
-        var request = URLRequest(url: url)
-        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ISBNLookupError.invalidResponse
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let message = json["message"] as? [String: Any],
+        guard let message = json["message"] as? [String: Any],
               let items = message["items"] as? [[String: Any]],
               let item = items.first else {
             throw ISBNLookupError.notFound
@@ -407,20 +411,9 @@ actor ISBNLookupService {
     /// Free, no API key. LOC does not serve cover images.
     private func lookupFromLibraryOfCongress(isbn: String) async throws -> BookMetadata {
         let encodedISBN = isbn.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? isbn
-        let urlString = "https://www.loc.gov/books/?q=\(encodedISBN)&fo=json&c=1"
-        guard let url = URL(string: urlString) else {
-            throw ISBNLookupError.invalidResponse
-        }
+        let json = try await fetchJSON("https://www.loc.gov/books/?q=\(encodedISBN)&fo=json&c=1")
 
-        let (data, response) = try await URLSession.shared.data(from: url)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ISBNLookupError.invalidResponse
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let results = json["results"] as? [[String: Any]],
+        guard let results = json["results"] as? [[String: Any]],
               let first = results.first,
               let title = first["title"] as? String, !title.isEmpty else {
             throw ISBNLookupError.notFound
@@ -471,21 +464,9 @@ actor ISBNLookupService {
 
     /// Looks up book metadata from Open Library API
     private func lookupFromOpenLibrary(isbn: String) async throws -> BookMetadata {
-        let urlString = "https://openlibrary.org/api/books?bibkeys=ISBN:\(isbn)&format=json&jscmd=data"
+        let json = try await fetchJSON("https://openlibrary.org/api/books?bibkeys=ISBN:\(isbn)&format=json&jscmd=data")
 
-        guard let url = URL(string: urlString) else {
-            throw ISBNLookupError.invalidResponse
-        }
-
-        let (data, response) = try await URLSession.shared.data(from: url)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ISBNLookupError.invalidResponse
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let bookData = json["ISBN:\(isbn)"] as? [String: Any] else {
+        guard let bookData = json["ISBN:\(isbn)"] as? [String: Any] else {
             throw ISBNLookupError.notFound
         }
 
@@ -525,19 +506,9 @@ actor ISBNLookupService {
         // Restrict the payload to just the fields we use; `limit=1` since ISBN is unique.
         let urlString = "https://openlibrary.org/search.json?isbn=\(isbn)"
             + "&fields=title,author_name,first_publish_year,cover_i&limit=1"
-        guard let url = URL(string: urlString) else {
-            throw ISBNLookupError.invalidResponse
-        }
+        let json = try await fetchJSON(urlString)
 
-        let (data, response) = try await URLSession.shared.data(from: url)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw ISBNLookupError.invalidResponse
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let docs = json["docs"] as? [[String: Any]],
+        guard let docs = json["docs"] as? [[String: Any]],
               let doc = docs.first,
               let title = doc["title"] as? String, !title.isEmpty else {
             throw ISBNLookupError.notFound
@@ -571,25 +542,13 @@ actor ISBNLookupService {
         let query = "\(title) \(author)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlString = "https://openlibrary.org/search.json?q=\(query)&limit=\(maxResults)"
 
-        guard let url = URL(string: urlString) else { return [] }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let docs = json["docs"] as? [[String: Any]] else {
-                return []
-            }
-
-            return docs.compactMap { doc -> String? in
-                guard let coverId = doc["cover_i"] as? Int else { return nil }
-                return "https://covers.openlibrary.org/b/id/\(coverId)-L.jpg"
-            }
-        } catch {
-            logger.error("Open Library search failed for '\(title) \(author)': \(error.localizedDescription)")
+        guard let json = try? await fetchJSON(urlString),
+              let docs = json["docs"] as? [[String: Any]] else {
             return []
+        }
+        return docs.compactMap { doc -> String? in
+            guard let coverId = doc["cover_i"] as? Int else { return nil }
+            return "https://covers.openlibrary.org/b/id/\(coverId)-L.jpg"
         }
     }
 
@@ -604,23 +563,12 @@ actor ISBNLookupService {
     /// network round-trip and never yielding a cover. Instead we parse the JSON to get
     /// the real image URL and validate that.
     private func getBookcoverAPIURL(isbn: String) async -> String? {
-        let apiURLString = "https://bookcover.longitood.com/bookcover/\(isbn)"
-        guard let apiURL = URL(string: apiURLString) else { return nil }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(from: apiURL)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let imageURL = json["url"] as? String,
-                  !imageURL.isEmpty else {
-                return nil
-            }
-            return await isValidImageURL(imageURL) ? imageURL : nil
-        } catch {
-            logger.debug("Bookcover API request failed for ISBN \(isbn): \(error.localizedDescription)")
+        guard let json = try? await fetchJSON("https://bookcover.longitood.com/bookcover/\(isbn)"),
+              let imageURL = json["url"] as? String,
+              !imageURL.isEmpty else {
             return nil
         }
+        return await isValidImageURL(imageURL) ? imageURL : nil
     }
 
     // MARK: - Better World Books
