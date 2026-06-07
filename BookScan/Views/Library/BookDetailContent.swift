@@ -18,6 +18,10 @@ struct BookDetailContent: View {
     let shelves: [Shelf]
     let onDelete: (() -> Void)?
 
+    // Measured at runtime by the sheets themselves so each detent fits its content
+    // exactly — no hardcoded heights. Seeded with rough defaults to avoid a first-open jump.
+    @State private var confirmationSheetMeasuredHeight: CGFloat = 210
+    @State private var coverSourceMeasuredHeight: CGFloat = 360
     @State private var showingDeleteConfirmation = false
     @State private var showingNewShelfAlert = false
     @State private var showingLendConfirmation = false
@@ -66,11 +70,13 @@ struct BookDetailContent: View {
                 title: "Delete Book",
                 message: "This action cannot be undone.",
                 actionLabel: "Delete",
-                actionRole: .destructive
+                actionRole: .destructive,
+                extraBottomPadding: isIPad ? 8 : 0,
+                measuredHeight: $confirmationSheetMeasuredHeight
             ) {
                 deleteBook()
             }
-            .presentationDetents([.height(185)])
+            .presentationDetents([.height(confirmationSheetMeasuredHeight)])
             .presentationCornerRadius(24)
         }
         .sheet(isPresented: $showingLendConfirmation) {
@@ -78,11 +84,13 @@ struct BookDetailContent: View {
                 title: "Lend Book",
                 message: "This book will be moved to the Lent shelf.",
                 actionLabel: "Lend",
-                actionRole: nil
+                actionRole: nil,
+                extraBottomPadding: isIPad ? 8 : 0,
+                measuredHeight: $confirmationSheetMeasuredHeight
             ) {
                 lendBook()
             }
-            .presentationDetents([.height(185)])
+            .presentationDetents([.height(confirmationSheetMeasuredHeight)])
             .presentationCornerRadius(24)
         }
         .sheet(isPresented: $showingReturnConfirmation) {
@@ -90,11 +98,13 @@ struct BookDetailContent: View {
                 title: "Return Book",
                 message: "This book will be returned to its original shelf.",
                 actionLabel: "Return",
-                actionRole: nil
+                actionRole: nil,
+                extraBottomPadding: isIPad ? 8 : 0,
+                measuredHeight: $confirmationSheetMeasuredHeight
             ) {
                 returnBook()
             }
-            .presentationDetents([.height(185)])
+            .presentationDetents([.height(confirmationSheetMeasuredHeight)])
             .presentationCornerRadius(24)
         }
         .alert("Cannot Lend Book", isPresented: $showingLendingShelfMissingAlert) {
@@ -103,11 +113,15 @@ struct BookDetailContent: View {
             Text("The lending shelf is not available right now. Please try again.")
         }
         .sheet(isPresented: $showingImageSourcePicker, onDismiss: handleCoverSourceDismiss) {
-            CoverSourceSheet(hasCover: book.coverImageData != nil) { source in
+            CoverSourceSheet(
+                hasCover: book.coverImageData != nil,
+                extraBottomPadding: isIPad ? 8 : 0,
+                measuredHeight: $coverSourceMeasuredHeight
+            ) { source in
                 pendingCoverSource = source
                 showingImageSourcePicker = false
             }
-            .presentationDetents([.height(coverSourceSheetHeight)])
+            .presentationDetents([.height(coverSourceMeasuredHeight)])
             .presentationCornerRadius(24)
         }
         .sheet(isPresented: $showingCamera) {
@@ -362,14 +376,8 @@ struct BookDetailContent: View {
 
     // MARK: - Actions
 
-    /// Height for the cover-source sheet, sized to its button count so there's no
-    /// empty space or internal scrolling (Remove Cover only shows when a cover exists).
-    private var coverSourceSheetHeight: CGFloat {
-        let optionCount = book.coverImageData != nil ? 4 : 3
-        let buttonCount = optionCount + 1 // options + Cancel
-        let buttons = CGFloat(buttonCount) * 50           // text 22 + vertical padding 28
-        let gaps = CGFloat(buttonCount - 1) * 12          // VStack spacing between buttons
-        return 16 + 22 + 12 + buttons + gaps + 8          // top + title + title-gap + buttons + bottom
+    private var isIPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
     }
 
     /// Runs the action chosen in the cover-source picker, after that sheet has fully
@@ -422,6 +430,37 @@ struct BookDetailContent: View {
     }
 }
 
+// MARK: - Self-Sizing Sheet Height
+
+/// Bubbles a sheet's rendered content height up to its parent so a `.height`
+/// presentation detent always matches the actual content size — no hardcoded
+/// heights or layout-constant math, on any device or Dynamic Type setting.
+private struct SheetHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private extension View {
+    /// Measures this view's rendered height (including padding) into `height`, so a
+    /// parent `.sheet` can feed it straight into `.presentationDetents([.height(...)])`.
+    func measuringHeight(into height: Binding<CGFloat>) -> some View {
+        // `.fixedSize(vertical:)` makes the content report its *ideal* height even when the
+        // current detent is shorter than the content. Without it, a too-short seed detent
+        // clamps the content's layout height, the GeometryReader measures that clamped value,
+        // and the detent can only ever shrink — never grow to fit — so taller content stays
+        // clipped (this is what cut off the cover-source sheet's Cancel button).
+        fixedSize(horizontal: false, vertical: true)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: SheetHeightKey.self, value: geo.size.height)
+                }
+            )
+            .onPreferenceChange(SheetHeightKey.self) { measured in
+                if measured > 0 { height.wrappedValue = measured }
+            }
+    }
+}
+
 // MARK: - Confirmation Half-Sheet
 
 /// A bottom half-sheet confirmation UI that avoids the confirmationDialog anchoring
@@ -437,6 +476,12 @@ private struct ConfirmationSheet: View {
     let message: String
     let actionLabel: String
     let actionRole: ButtonRole?
+    /// Extra bottom padding. Pass isIPad ? 8 : 0 from the parent — size-class
+    /// checks inside this sheet resolve to .compact on iPad's narrow form panel.
+    var extraBottomPadding: CGFloat = 0
+    /// Written by the sheet's background GeometryReader so the parent can use
+    /// the measured height as the presentationDetents value.
+    @Binding var measuredHeight: CGFloat
     let onConfirm: () -> Void
 
     private var actionColor: Color {
@@ -486,7 +531,9 @@ private struct ConfirmationSheet: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
-        .padding(.bottom, 8)
+        .padding(.bottom, 8 + extraBottomPadding)
+        // Feed the rendered height back to the parent so the detent is exact.
+        .measuringHeight(into: $measuredHeight)
     }
 }
 
@@ -504,6 +551,12 @@ private struct CoverSourceSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let hasCover: Bool
+    /// See ConfirmationSheet.extraBottomPadding for why this is passed from the parent.
+    var extraBottomPadding: CGFloat = 0
+    /// Written by the sheet's background measurement so the parent can use the
+    /// measured height as the presentationDetents value (the button count varies
+    /// with `hasCover`, so a measured height beats a hand-computed one).
+    @Binding var measuredHeight: CGFloat
     let onSelect: (CoverSource) -> Void
 
     var body: some View {
@@ -535,7 +588,9 @@ private struct CoverSourceSheet: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
-        .padding(.bottom, 8)
+        .padding(.bottom, 8 + extraBottomPadding)
+        // Feed the rendered height back to the parent so the detent is exact.
+        .measuringHeight(into: $measuredHeight)
     }
 
     @ViewBuilder

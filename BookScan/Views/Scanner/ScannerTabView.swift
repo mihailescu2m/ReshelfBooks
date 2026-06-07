@@ -33,7 +33,6 @@ enum ScannerSheet: Identifiable {
 /// presentation for another in place, so we stash the follow-up and perform it in
 /// `onDismiss`, which avoids the timing hacks the old two-sheet design needed.
 private enum PendingScannerAction {
-    case present(ScannerSheet)
     case showManualEntry(initialISBN: String?)
     case lookup(String)
 }
@@ -225,12 +224,6 @@ struct ScannerTabView: View {
 
     // MARK: - Sheet coordination
 
-    /// Dismisses the current card sheet, then presents `sheet` once dismissal completes.
-    private func transition(to sheet: ScannerSheet) {
-        pendingAction = .present(sheet)
-        activeSheet = nil
-    }
-
     /// Dismisses any active card sheet, then presents the full-screen manual entry cover.
     /// Called from within ExistingBookView / NewBookView via their onManualEntry callback.
     private func transitionToManualEntry(initialISBN: String? = nil) {
@@ -240,9 +233,6 @@ struct ScannerTabView: View {
 
     private func handleSheetDismiss() {
         switch pendingAction {
-        case .present(let sheet):
-            pendingAction = nil
-            activeSheet = sheet
         case .showManualEntry(let isbn):
             pendingAction = nil
             manualEntryISBN = isbn
@@ -263,7 +253,7 @@ struct ScannerTabView: View {
         case nil:
             resetScanner()
         default:
-            // .present / .showManualEntry aren't triggered from within manual entry
+            // .showManualEntry isn't triggered from within manual entry
             pendingAction = nil
             resetScanner()
         }
