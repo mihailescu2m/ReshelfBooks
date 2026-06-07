@@ -29,6 +29,15 @@ struct SearchView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // Custom header — same pattern as all other sheets in the app
+                ZStack {
+                    Text("Search").font(.headline)
+                    HStack { Button("Cancel") { dismiss() }; Spacer() }
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                Divider()
+
                 searchBar
 
                 if debouncedSearchText.isEmpty {
@@ -39,15 +48,7 @@ struct SearchView: View {
                     searchResultsList
                 }
             }
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .onAppear {
                 isSearchFocused = true
             }
@@ -268,11 +269,19 @@ struct SearchBookDetailView: View {
     let shelves: [Shelf]
 
     var body: some View {
-        BookDetailContent(book: book, shelves: shelves) {
-            dismiss()
+        VStack(spacing: 0) {
+            ZStack {
+                Text("Book Details").font(.headline)
+                HStack { Button("Back") { dismiss() }; Spacer() }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 12)
+            Divider()
+            BookDetailContent(book: book, shelves: shelves) {
+                dismiss()
+            }
         }
-        .navigationTitle("Book Details")
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
     }
 }
 
