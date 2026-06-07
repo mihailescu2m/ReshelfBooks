@@ -31,7 +31,14 @@ struct LibraryTabView: View {
     @State private var shareUnavailable = false
 
     var body: some View {
-        NavigationStack {
+        // No NavigationStack — this view is a page inside ContentView's page-style
+        // TabView (backed by UIPageViewController). Wrapping each tab in its own
+        // NavigationStack nests wrapped navigation controllers, which crashes on iPad
+        // (NSInternalInconsistencyException) when both pages lay out at once. The
+        // toolbar is replaced by an inline header instead.
+        VStack(spacing: 0) {
+            header
+            Divider()
             Group {
                 if isLibraryEmpty {
                     emptyLibraryView
@@ -39,31 +46,12 @@ struct LibraryTabView: View {
                     libraryContentView
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        presentSharing()
-                    } label: {
-                        Label("Share Library", systemImage: "square.and.arrow.up")
-                    }
-                }
-                ToolbarItem(placement: .principal) {
-                    Text(persistence.isLibraryShared ? "Shared Library" : "Library")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showingNewShelfAlert = true
-                    } label: {
-                        Label("Add Shelf", systemImage: "plus")
-                    }
-                }
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .newShelfAlert(isPresented: $showingNewShelfAlert)
             .sheet(item: $selectedBook) { book in
                 BookDetailView(book: book, shelves: Array(shelves))
+                    .presentationDetents([.large])
+                    .presentationSizing(.page)
             }
             .onAppear {
                 persistence.refreshSharedState()
@@ -74,6 +62,34 @@ struct LibraryTabView: View {
                 Text("Family sharing needs iCloud. Make sure you're signed into iCloud in Settings, then try again.")
             }
         }
+    }
+
+    private var header: some View {
+        ZStack {
+            Text(persistence.isLibraryShared ? "Shared Library" : "Library")
+                .font(.headline)
+                .foregroundStyle(.primary)
+
+            HStack {
+                Button {
+                    presentSharing()
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("Share Library")
+
+                Spacer()
+
+                Button {
+                    showingNewShelfAlert = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Add Shelf")
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     /// Opens the family-sharing sheet. Resolves (creating if needed) the library and

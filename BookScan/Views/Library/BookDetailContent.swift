@@ -27,6 +27,10 @@ struct BookDetailContent: View {
     @State private var showingPhotoLibrary = false
     @State private var showingWebSearch = false
     @State private var selectedImage: UIImage?
+    // The cover source chosen in the picker sheet. Stashed and acted on in the
+    // picker's onDismiss so we don't try to present a second sheet (camera/library/
+    // web) while the picker is still dismissing.
+    @State private var pendingCoverSource: CoverSource? = nil
 
     init(book: Book, shelves: [Shelf], onDelete: (() -> Void)? = nil) {
         self.book = book
@@ -56,64 +60,54 @@ struct BookDetailContent: View {
         .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
             book.shelf = newShelf
         }
-        .confirmationDialog(
-            "Delete Book",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
+        .sheet(isPresented: $showingDeleteConfirmation) {
+            ConfirmationSheet(
+                title: "Delete Book",
+                message: "This action cannot be undone.",
+                actionLabel: "Delete",
+                actionRole: .destructive
+            ) {
                 deleteBook()
             }
-        } message: {
-            Text("This action cannot be undone.")
+            .presentationDetents([.height(185)])
+            .presentationCornerRadius(24)
         }
-        .confirmationDialog(
-            "Lend Book",
-            isPresented: $showingLendConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Lend") {
+        .sheet(isPresented: $showingLendConfirmation) {
+            ConfirmationSheet(
+                title: "Lend Book",
+                message: "This book will be moved to the Lent shelf.",
+                actionLabel: "Lend",
+                actionRole: nil
+            ) {
                 lendBook()
             }
-        } message: {
-            Text("This book will be moved to the Lent shelf. Scan the barcode again when it's returned.")
+            .presentationDetents([.height(185)])
+            .presentationCornerRadius(24)
         }
-        .confirmationDialog(
-            "Return Book",
-            isPresented: $showingReturnConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Return") {
+        .sheet(isPresented: $showingReturnConfirmation) {
+            ConfirmationSheet(
+                title: "Return Book",
+                message: "This book will be returned to its original shelf.",
+                actionLabel: "Return",
+                actionRole: nil
+            ) {
                 returnBook()
             }
-        } message: {
-            Text("This book will be returned to its original shelf.")
+            .presentationDetents([.height(185)])
+            .presentationCornerRadius(24)
         }
         .alert("Cannot Lend Book", isPresented: $showingLendingShelfMissingAlert) {
             Button("OK", role: .cancel) {}
         } message: {
             Text("The lending shelf is not available right now. Please try again.")
         }
-        .confirmationDialog(
-            "Change Cover Image",
-            isPresented: $showingImageSourcePicker,
-            titleVisibility: .visible
-        ) {
-            Button("Take Photo") {
-                showingCamera = true
+        .sheet(isPresented: $showingImageSourcePicker, onDismiss: handleCoverSourceDismiss) {
+            CoverSourceSheet(hasCover: book.coverImageData != nil) { source in
+                pendingCoverSource = source
+                showingImageSourcePicker = false
             }
-            Button("Choose from Library") {
-                showingPhotoLibrary = true
-            }
-            Button("Search the Web") {
-                showingWebSearch = true
-            }
-            if book.coverImageData != nil {
-                Button("Remove Cover", role: .destructive) {
-                    book.coverImageData = nil
-                    persistence.save()
-                }
-            }
+            .presentationDetents([.height(coverSourceSheetHeight)])
+            .presentationCornerRadius(24)
         }
         .sheet(isPresented: $showingCamera) {
             ImagePicker(selectedImage: $selectedImage, sourceType: .camera)
@@ -358,6 +352,35 @@ struct BookDetailContent: View {
 
     // MARK: - Actions
 
+    /// Height for the cover-source sheet, sized to its button count so there's no
+    /// empty space or internal scrolling (Remove Cover only shows when a cover exists).
+    private var coverSourceSheetHeight: CGFloat {
+        let optionCount = book.coverImageData != nil ? 4 : 3
+        let buttonCount = optionCount + 1 // options + Cancel
+        let buttons = CGFloat(buttonCount) * 50           // text 22 + vertical padding 28
+        let gaps = CGFloat(buttonCount - 1) * 12          // VStack spacing between buttons
+        return 16 + 22 + 12 + buttons + gaps + 8          // top + title + title-gap + buttons + bottom
+    }
+
+    /// Runs the action chosen in the cover-source picker, after that sheet has fully
+    /// dismissed — presenting camera/library/web here avoids a sheet-over-sheet clash.
+    private func handleCoverSourceDismiss() {
+        switch pendingCoverSource {
+        case .camera:
+            showingCamera = true
+        case .library:
+            showingPhotoLibrary = true
+        case .web:
+            showingWebSearch = true
+        case .remove:
+            book.coverImageData = nil
+            persistence.save()
+        case nil:
+            break
+        }
+        pendingCoverSource = nil
+    }
+
     private func deleteBook() {
         // Save immediately so a re-scan of the same book doesn't find a stale record.
         persistence.delete(book)
@@ -386,6 +409,137 @@ struct BookDetailContent: View {
         }
         persistence.save()
         dismiss()
+    }
+}
+
+// MARK: - Confirmation Half-Sheet
+
+/// A bottom half-sheet confirmation UI that avoids the confirmationDialog anchoring
+/// bug (inside NavigationStack inside .sheet the system dialog renders floating/centred
+/// rather than sliding up from the screen bottom).
+///
+/// Both the confirm and cancel actions use the same full-width pill shape.
+/// The drag indicator is intentionally hidden — Cancel is the explicit exit.
+private struct ConfirmationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let title: String
+    let message: String
+    let actionLabel: String
+    let actionRole: ButtonRole?
+    let onConfirm: () -> Void
+
+    private var actionColor: Color {
+        actionRole == .destructive ? .red : .accentColor
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            VStack(spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 4)
+
+            // Primary action
+            Button(role: actionRole) {
+                dismiss()
+                onConfirm()
+            } label: {
+                Text(actionLabel)
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(actionColor)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+
+            // Cancel — same shape, neutral grey so it reads as secondary
+            Button {
+                dismiss()
+            } label: {
+                Text("Cancel")
+                    .font(.body.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color(.systemGray5))
+                    .foregroundStyle(.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+    }
+}
+
+// MARK: - Cover Source Picker Sheet
+
+private enum CoverSource {
+    case camera, library, web, remove
+}
+
+/// Action-sheet-style picker for changing a book's cover, using the same custom
+/// half-sheet styling as ConfirmationSheet (so it matches Lend/Return/Delete instead
+/// of the old floating confirmationDialog). Each option is a full-width pill; the
+/// selection is reported via `onSelect` and performed in the parent's onDismiss.
+private struct CoverSourceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let hasCover: Bool
+    let onSelect: (CoverSource) -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("Change Cover Image")
+                .font(.headline)
+                .padding(.top, 4)
+
+            optionButton("Take Photo") { onSelect(.camera) }
+            optionButton("Choose from Library") { onSelect(.library) }
+            optionButton("Search the Web") { onSelect(.web) }
+            if hasCover {
+                optionButton("Remove Cover", role: .destructive) { onSelect(.remove) }
+            }
+
+            // Cancel — neutral grey, matches ConfirmationSheet's Cancel.
+            Button {
+                dismiss()
+            } label: {
+                Text("Cancel")
+                    .font(.body.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color(.systemGray5))
+                    .foregroundStyle(.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private func optionButton(_ label: String, role: ButtonRole? = nil, action: @escaping () -> Void) -> some View {
+        Button(role: role, action: action) {
+            Text(label)
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Color(.systemGray6))
+                .foregroundStyle(role == .destructive ? Color.red : Color.accentColor)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 }
 

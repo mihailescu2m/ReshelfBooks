@@ -25,7 +25,16 @@ struct ExistingBookView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // No NavigationStack — presented as a sheet from ScannerTabView's NavigationStack;
+        // nesting a second one causes a fatal nav-bar conflict on iPad.
+        VStack(spacing: 0) {
+            ZStack {
+                Text("Book Location").font(.headline)
+                HStack { Spacer(); Button("Done") { dismiss() } }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            Divider()
             Group {
                 // If a family member deletes this book while it's on screen, its
                 // relationships fault to rows that no longer exist — don't render them.
@@ -59,15 +68,6 @@ struct ExistingBookView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         cancelAutoDismiss()
-                    }
-                }
-            }
-            .navigationTitle("Book Location")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
                     }
                 }
             }

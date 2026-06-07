@@ -32,7 +32,24 @@ struct WebCoverSearchView: View {
     ]
 
     var body: some View {
-        NavigationStack {
+        // No NavigationStack — presented as a sheet from BookDetailContent's parent
+        // NavigationStack; nesting a second one causes a fatal nav-bar conflict on iPad.
+        VStack(spacing: 0) {
+            ZStack {
+                Text("Search Web").font(.headline)
+                HStack {
+                    Button("Cancel") {
+                        // Mark as selected so any in-flight download that completes
+                        // after this dismiss doesn't commit its image to the parent.
+                        hasSelected = true
+                        dismiss()
+                    }
+                    Spacer()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            Divider()
             Group {
                 if isSearching {
                     loadingView
@@ -40,18 +57,6 @@ struct WebCoverSearchView: View {
                     noResultsView
                 } else {
                     coverGridView
-                }
-            }
-            .navigationTitle("Search Web")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
-                        // Mark as selected so any in-flight download that completes
-                        // after this dismiss doesn't commit its image to the parent.
-                        hasSelected = true
-                        dismiss()
-                    }
                 }
             }
             .task {

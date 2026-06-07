@@ -33,7 +33,16 @@ struct NewBookView: View {
     @State private var isLoadingImage = false
 
     var body: some View {
-        NavigationStack {
+        // No NavigationStack — presented as a sheet from ScannerTabView's NavigationStack;
+        // nesting a second one causes a fatal nav-bar conflict on iPad.
+        VStack(spacing: 0) {
+            ZStack {
+                Text("New Book").font(.headline)
+                HStack { Button("Cancel") { dismiss() }; Spacer() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            Divider()
             ScrollView {
                 VStack(spacing: 24) {
                     headerSection
@@ -49,15 +58,6 @@ struct NewBookView: View {
                     saveButton
                 }
                 .padding()
-            }
-            .navigationTitle("New Book")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
             }
             .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
                 selectedShelf = newShelf

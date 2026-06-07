@@ -23,7 +23,16 @@ struct ManualISBNEntryView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        // No NavigationStack — presented as a sheet from ScannerTabView's NavigationStack;
+        // nesting a second one causes a fatal nav-bar conflict on iPad.
+        VStack(spacing: 0) {
+            ZStack {
+                Text("Enter ISBN").font(.headline)
+                HStack { Button("Cancel") { dismiss() }; Spacer() }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            Divider()
             ScrollView {
                 VStack(spacing: 32) {
                     headerSection
@@ -35,15 +44,6 @@ struct ManualISBNEntryView: View {
                     lookupButton
                 }
                 .padding()
-            }
-            .navigationTitle("Enter ISBN")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
             }
             .onAppear {
                 if let initialISBN = initialISBN {

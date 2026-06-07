@@ -14,19 +14,17 @@ struct BookDetailView: View {
     let shelves: [Shelf]
 
     var body: some View {
-        NavigationStack {
-            BookDetailContent(book: book, shelves: shelves) {
-                dismiss()
+        // No NavigationStack — this sheet is presented from within LibraryTabView's
+        // NavigationStack; nesting a second one causes a fatal nav-bar conflict on iPad.
+        VStack(spacing: 0) {
+            ZStack {
+                Text("Book Details").font(.headline)
+                HStack { Spacer(); Button("Done") { dismiss() } }
             }
-            .navigationTitle("Book Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            Divider()
+            BookDetailContent(book: book, shelves: shelves) { dismiss() }
         }
     }
 }
