@@ -12,6 +12,7 @@ import SwiftUI
 struct BookDetailContent: View {
     @EnvironmentObject private var persistence: PersistenceController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @ObservedObject var book: Book
     let shelves: [Shelf]
@@ -238,11 +239,20 @@ struct BookDetailContent: View {
                     .background(Color(.tertiarySystemBackground))
                     .cornerRadius(8)
             } else {
-                VStack(spacing: 8) {
-                    shelfOption(nil, label: "Unshelved")
-
-                    ForEach(shelves.regularShelves) { shelf in
-                        shelfOption(shelf, label: shelf.name)
+                if horizontalSizeClass == .regular {
+                    // iPad: two-column grid so the wide sheet space is used well
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        shelfOption(nil, label: "Unshelved")
+                        ForEach(shelves.regularShelves) { shelf in
+                            shelfOption(shelf, label: shelf.name)
+                        }
+                    }
+                } else {
+                    VStack(spacing: 8) {
+                        shelfOption(nil, label: "Unshelved")
+                        ForEach(shelves.regularShelves) { shelf in
+                            shelfOption(shelf, label: shelf.name)
+                        }
                     }
                 }
             }
