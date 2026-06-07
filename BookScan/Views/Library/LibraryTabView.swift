@@ -216,6 +216,9 @@ struct LibraryTabView: View {
             }
             .padding()
         }
+        // Clear the floating tab bar (overlaid by ContentView) so the last shelf/book
+        // can scroll above it instead of being hidden behind it.
+        .contentMargins(.bottom, 90, for: .scrollContent)
     }
 
     private var unshelvedBooks: [Book] {
