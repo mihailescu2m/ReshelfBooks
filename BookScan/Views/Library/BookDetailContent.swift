@@ -12,25 +12,28 @@ import SwiftUI
 struct BookDetailContent: View {
     @EnvironmentObject private var persistence: PersistenceController
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-
     @ObservedObject var book: Book
     let shelves: [Shelf]
     let onDelete: (() -> Void)?
 
-    // Measured at runtime by the sheets themselves so each detent fits its content
-    // exactly — no hardcoded heights. Seeded with rough defaults to avoid a first-open jump.
-    @State private var confirmationSheetMeasuredHeight: CGFloat = 210
-    @State private var coverSourceMeasuredHeight: CGFloat = 360
-    @State private var showingDeleteConfirmation = false
+    // Half-sheet detent heights are computed deterministically from the button count
+    // (see halfSheetHeight) rather than measured at runtime. A measured height only
+    // becomes available *after* the sheet is presented, and an iPad form sheet does not
+    // reliably resize once it's on screen — so it would stay stuck at its seed and clip
+    // taller content (this is what cramped the cover sheet). A computed height is known
+    // at presentation time, so the card is the right size immediately, on iPhone and iPad.
+    //
+    // The pieces are @ScaledMetric so the detent grows with Dynamic Type along with the
+    // text it's sizing around.
+    @ScaledMetric(relativeTo: .headline) private var sheetTitleHeight: CGFloat = 22
+    @ScaledMetric(relativeTo: .subheadline) private var sheetMessageHeight: CGFloat = 20
+    @ScaledMetric(relativeTo: .body) private var sheetButtonHeight: CGFloat = 50
+    // Single presentation binding — one .sheet(item:) avoids having multiple
+    // presentation state machines on the same view, which causes the first
+    // presentation to auto-dismiss (reproducible on iPad).
+    @State private var activeSheet: BookDetailSheet?
     @State private var showingNewShelfAlert = false
-    @State private var showingLendConfirmation = false
-    @State private var showingReturnConfirmation = false
     @State private var showingLendingShelfMissingAlert = false
-    @State private var showingImageSourcePicker = false
-    @State private var showingCamera = false
-    @State private var showingPhotoLibrary = false
-    @State private var showingWebSearch = false
     @State private var selectedImage: UIImage?
     // The cover source chosen in the picker sheet. Stashed and acted on in the
     // picker's onDismiss so we don't try to present a second sheet (camera/library/
@@ -65,79 +68,16 @@ struct BookDetailContent: View {
         .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
             book.shelf = newShelf
         }
-        .sheet(isPresented: $showingDeleteConfirmation) {
-            ConfirmationSheet(
-                title: "Delete Book",
-                message: "This action cannot be undone.",
-                actionLabel: "Delete",
-                actionRole: .destructive,
-                extraBottomPadding: isIPad ? 8 : 0,
-                measuredHeight: $confirmationSheetMeasuredHeight
-            ) {
-                deleteBook()
-            }
-            .presentationDetents([.height(confirmationSheetMeasuredHeight)])
-            .presentationCornerRadius(24)
-        }
-        .sheet(isPresented: $showingLendConfirmation) {
-            ConfirmationSheet(
-                title: "Lend Book",
-                message: "This book will be moved to the Lent shelf.",
-                actionLabel: "Lend",
-                actionRole: nil,
-                extraBottomPadding: isIPad ? 8 : 0,
-                measuredHeight: $confirmationSheetMeasuredHeight
-            ) {
-                lendBook()
-            }
-            .presentationDetents([.height(confirmationSheetMeasuredHeight)])
-            .presentationCornerRadius(24)
-        }
-        .sheet(isPresented: $showingReturnConfirmation) {
-            ConfirmationSheet(
-                title: "Return Book",
-                message: "This book will be returned to its original shelf.",
-                actionLabel: "Return",
-                actionRole: nil,
-                extraBottomPadding: isIPad ? 8 : 0,
-                measuredHeight: $confirmationSheetMeasuredHeight
-            ) {
-                returnBook()
-            }
-            .presentationDetents([.height(confirmationSheetMeasuredHeight)])
-            .presentationCornerRadius(24)
-        }
         .alert("Cannot Lend Book", isPresented: $showingLendingShelfMissingAlert) {
             Button("OK", role: .cancel) {}
         } message: {
             Text("The lending shelf is not available right now. Please try again.")
         }
-        .sheet(isPresented: $showingImageSourcePicker, onDismiss: handleCoverSourceDismiss) {
-            CoverSourceSheet(
-                hasCover: book.coverImageData != nil,
-                extraBottomPadding: isIPad ? 8 : 0,
-                measuredHeight: $coverSourceMeasuredHeight
-            ) { source in
-                pendingCoverSource = source
-                showingImageSourcePicker = false
-            }
-            .presentationDetents([.height(coverSourceMeasuredHeight)])
-            .presentationCornerRadius(24)
-        }
-        .sheet(isPresented: $showingCamera) {
-            ImagePicker(selectedImage: $selectedImage, sourceType: .camera)
-                .ignoresSafeArea()
-        }
-        .sheet(isPresented: $showingPhotoLibrary) {
-            PhotoLibraryPicker(selectedImage: $selectedImage)
-        }
-        .sheet(isPresented: $showingWebSearch) {
-            WebCoverSearchView(
-                isbn: book.isbn,
-                title: book.title,
-                author: book.author,
-                selectedImage: $selectedImage
-            )
+        // Single sheet modifier — multiple .sheet modifiers on the same view create
+        // competing presentation state machines that cause the first presentation to
+        // auto-dismiss (same root cause as the ScannerTabView two-sheet bug).
+        .sheet(item: $activeSheet, onDismiss: handleSheetDismiss) { sheet in
+            sheetContent(for: sheet)
         }
         .onChange(of: selectedImage) { _, newImage in
             if let image = newImage {
@@ -160,7 +100,7 @@ struct BookDetailContent: View {
                     .shadow(radius: 8)
 
                 Button {
-                    showingImageSourcePicker = true
+                    activeSheet = .imagePicker
                 } label: {
                     Image(systemName: "camera.fill")
                         .font(.system(size: 14, weight: .semibold))
@@ -253,20 +193,14 @@ struct BookDetailContent: View {
                     .background(Color(.tertiarySystemBackground))
                     .cornerRadius(8)
             } else {
-                if horizontalSizeClass == .regular {
-                    // iPad: two-column grid so the wide sheet space is used well
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        shelfOption(nil, label: "Unshelved")
-                        ForEach(shelves.regularShelves) { shelf in
-                            shelfOption(shelf, label: shelf.name)
-                        }
-                    }
-                } else {
-                    VStack(spacing: 8) {
-                        shelfOption(nil, label: "Unshelved")
-                        ForEach(shelves.regularShelves) { shelf in
-                            shelfOption(shelf, label: shelf.name)
-                        }
+                // Adaptive grid: fits as many columns as the available width allows.
+                // min 260 pt → 1 column in portrait, 2+ columns in landscape and on iPad,
+                // without a size-class check (which is always .compact on iPhone regardless
+                // of orientation, causing a forced single-column layout in landscape).
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260))], spacing: 8) {
+                    shelfOption(nil, label: "Unshelved")
+                    ForEach(shelves.regularShelves) { shelf in
+                        shelfOption(shelf, label: shelf.name)
                     }
                 }
             }
@@ -322,7 +256,7 @@ struct BookDetailContent: View {
             if book.isLent {
                 // Return button (green)
                 Button {
-                    showingReturnConfirmation = true
+                    activeSheet = .returnConfirmation
                 } label: {
                     HStack {
                         Image(systemName: "arrow.down.backward")
@@ -339,7 +273,7 @@ struct BookDetailContent: View {
             } else {
                 // Lend button (blue)
                 Button {
-                    showingLendConfirmation = true
+                    activeSheet = .lendConfirmation
                 } label: {
                     HStack {
                         Image(systemName: "arrow.up.forward")
@@ -357,7 +291,7 @@ struct BookDetailContent: View {
 
             // Delete button
             Button(role: .destructive) {
-                showingDeleteConfirmation = true
+                activeSheet = .deleteConfirmation
             } label: {
                 HStack {
                     Image(systemName: "trash")
@@ -380,16 +314,100 @@ struct BookDetailContent: View {
         UIDevice.current.userInterfaceIdiom == .pad
     }
 
-    /// Runs the action chosen in the cover-source picker, after that sheet has fully
-    /// dismissed — presenting camera/library/web here avoids a sheet-over-sheet clash.
-    private func handleCoverSourceDismiss() {
-        switch pendingCoverSource {
+    /// Detent height for a half-sheet with a centered title + one-line message and
+    /// `buttonCount` full-width pill buttons (the option buttons plus Cancel). Mirrors
+    /// the layout in ConfirmationSheet / CoverSourceSheet exactly:
+    ///
+    ///   topPad(16) + headerTopPad(4) + title + headerSpacing(8) + message
+    ///   + buttonCount × (button + outerSpacing(12)) + bottomPad(8 [+8 on iPad])
+    ///
+    /// Computed (not measured) so the value exists at presentation time — an iPad form
+    /// sheet won't resize after it's shown, so the height must be right up front.
+    private func halfSheetHeight(buttonCount: Int) -> CGFloat {
+        let topPadding: CGFloat = 16 + 4
+        let headerSpacing: CGFloat = 8
+        let outerSpacing: CGFloat = 12
+        let bottomPadding: CGFloat = 8 + (isIPad ? 8 : 0)
+        let header = sheetTitleHeight + headerSpacing + sheetMessageHeight
+        let buttons = CGFloat(buttonCount) * (sheetButtonHeight + outerSpacing)
+        return topPadding + header + buttons + bottomPadding
+    }
+
+    @ViewBuilder
+    private func sheetContent(for sheet: BookDetailSheet) -> some View {
+        switch sheet {
+        case .deleteConfirmation:
+            ConfirmationSheet(
+                title: "Delete Book",
+                message: "This action cannot be undone.",
+                actionLabel: "Delete",
+                actionRole: .destructive,
+                extraBottomPadding: isIPad ? 8 : 0
+            ) { deleteBook() }
+            // 2 buttons: the action + Cancel.
+            .presentationDetents([.height(halfSheetHeight(buttonCount: 2))])
+            .presentationCornerRadius(24)
+
+        case .lendConfirmation:
+            ConfirmationSheet(
+                title: "Lend Book",
+                message: "This book will be moved to the Lent shelf.",
+                actionLabel: "Lend",
+                actionRole: nil,
+                extraBottomPadding: isIPad ? 8 : 0
+            ) { lendBook() }
+            .presentationDetents([.height(halfSheetHeight(buttonCount: 2))])
+            .presentationCornerRadius(24)
+
+        case .returnConfirmation:
+            ConfirmationSheet(
+                title: "Return Book",
+                message: "This book will be returned to its original shelf.",
+                actionLabel: "Return",
+                actionRole: nil,
+                extraBottomPadding: isIPad ? 8 : 0
+            ) { returnBook() }
+            .presentationDetents([.height(halfSheetHeight(buttonCount: 2))])
+            .presentationCornerRadius(24)
+
+        case .imagePicker:
+            let hasCover = book.coverImageData != nil
+            CoverSourceSheet(
+                hasCover: hasCover,
+                extraBottomPadding: isIPad ? 8 : 0
+            ) { source in
+                pendingCoverSource = source
+                activeSheet = nil
+            }
+            // 3 source options + (Remove Cover when present) + Cancel.
+            .presentationDetents([.height(halfSheetHeight(buttonCount: hasCover ? 5 : 4))])
+            .presentationCornerRadius(24)
+
         case .camera:
-            showingCamera = true
-        case .library:
-            showingPhotoLibrary = true
-        case .web:
-            showingWebSearch = true
+            ImagePicker(selectedImage: $selectedImage, sourceType: .camera)
+                .ignoresSafeArea()
+
+        case .photoLibrary:
+            PhotoLibraryPicker(selectedImage: $selectedImage)
+
+        case .webSearch:
+            WebCoverSearchView(
+                isbn: book.isbn,
+                title: book.title,
+                author: book.author,
+                selectedImage: $selectedImage
+            )
+        }
+    }
+
+    /// Called when the active sheet dismisses. For the cover-source picker the
+    /// pending source is stashed here so camera/library/web opens after the picker
+    /// has fully gone — never two sheets at once.
+    private func handleSheetDismiss() {
+        switch pendingCoverSource {
+        case .camera:    activeSheet = .camera
+        case .library:   activeSheet = .photoLibrary
+        case .web:       activeSheet = .webSearch
         case .remove:
             book.coverImageData = nil
             persistence.save()
@@ -430,37 +448,6 @@ struct BookDetailContent: View {
     }
 }
 
-// MARK: - Self-Sizing Sheet Height
-
-/// Bubbles a sheet's rendered content height up to its parent so a `.height`
-/// presentation detent always matches the actual content size — no hardcoded
-/// heights or layout-constant math, on any device or Dynamic Type setting.
-private struct SheetHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
-private extension View {
-    /// Measures this view's rendered height (including padding) into `height`, so a
-    /// parent `.sheet` can feed it straight into `.presentationDetents([.height(...)])`.
-    func measuringHeight(into height: Binding<CGFloat>) -> some View {
-        // `.fixedSize(vertical:)` makes the content report its *ideal* height even when the
-        // current detent is shorter than the content. Without it, a too-short seed detent
-        // clamps the content's layout height, the GeometryReader measures that clamped value,
-        // and the detent can only ever shrink — never grow to fit — so taller content stays
-        // clipped (this is what cut off the cover-source sheet's Cancel button).
-        fixedSize(horizontal: false, vertical: true)
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(key: SheetHeightKey.self, value: geo.size.height)
-                }
-            )
-            .onPreferenceChange(SheetHeightKey.self) { measured in
-                if measured > 0 { height.wrappedValue = measured }
-            }
-    }
-}
-
 // MARK: - Confirmation Half-Sheet
 
 /// A bottom half-sheet confirmation UI that avoids the confirmationDialog anchoring
@@ -479,9 +466,6 @@ private struct ConfirmationSheet: View {
     /// Extra bottom padding. Pass isIPad ? 8 : 0 from the parent — size-class
     /// checks inside this sheet resolve to .compact on iPad's narrow form panel.
     var extraBottomPadding: CGFloat = 0
-    /// Written by the sheet's background GeometryReader so the parent can use
-    /// the measured height as the presentationDetents value.
-    @Binding var measuredHeight: CGFloat
     let onConfirm: () -> Void
 
     private var actionColor: Color {
@@ -532,8 +516,36 @@ private struct ConfirmationSheet: View {
         .padding(.horizontal, 24)
         .padding(.top, 16)
         .padding(.bottom, 8 + extraBottomPadding)
-        // Feed the rendered height back to the parent so the detent is exact.
-        .measuringHeight(into: $measuredHeight)
+        // Pin to the top of the detent so any rounding slack between the computed
+        // detent height and the rendered content lands at the bottom rather than
+        // centering the content (which would leave gaps above the title and below Cancel).
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+// MARK: - Sheet Enum
+
+/// All sheets BookDetailContent can present. Drives a single `.sheet(item:)` so
+/// SwiftUI never has competing presentation state machines on the same view.
+private enum BookDetailSheet: Identifiable {
+    case deleteConfirmation
+    case lendConfirmation
+    case returnConfirmation
+    case imagePicker
+    case camera
+    case photoLibrary
+    case webSearch
+
+    var id: String {
+        switch self {
+        case .deleteConfirmation:  return "deleteConfirmation"
+        case .lendConfirmation:    return "lendConfirmation"
+        case .returnConfirmation:  return "returnConfirmation"
+        case .imagePicker:         return "imagePicker"
+        case .camera:              return "camera"
+        case .photoLibrary:        return "photoLibrary"
+        case .webSearch:           return "webSearch"
+        }
     }
 }
 
@@ -553,17 +565,19 @@ private struct CoverSourceSheet: View {
     let hasCover: Bool
     /// See ConfirmationSheet.extraBottomPadding for why this is passed from the parent.
     var extraBottomPadding: CGFloat = 0
-    /// Written by the sheet's background measurement so the parent can use the
-    /// measured height as the presentationDetents value (the button count varies
-    /// with `hasCover`, so a measured height beats a hand-computed one).
-    @Binding var measuredHeight: CGFloat
     let onSelect: (CoverSource) -> Void
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Change Cover Image")
-                .font(.headline)
-                .padding(.top, 4)
+            VStack(spacing: 8) {
+                Text("Change Cover Image")
+                    .font(.headline)
+                Text("Select image source from below.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 4)
 
             optionButton("Take Photo") { onSelect(.camera) }
             optionButton("Choose from Library") { onSelect(.library) }
@@ -589,8 +603,9 @@ private struct CoverSourceSheet: View {
         .padding(.horizontal, 24)
         .padding(.top, 16)
         .padding(.bottom, 8 + extraBottomPadding)
-        // Feed the rendered height back to the parent so the detent is exact.
-        .measuringHeight(into: $measuredHeight)
+        // See ConfirmationSheet — top-anchor so any rounding slack lands at the bottom
+        // instead of centering the content.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
@@ -600,8 +615,8 @@ private struct CoverSourceSheet: View {
                 .font(.body.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(Color(.systemGray6))
-                .foregroundStyle(role == .destructive ? Color.red : Color.accentColor)
+                .background(role == .destructive ? Color.red : Color.accentColor)
+                .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .buttonStyle(.plain)

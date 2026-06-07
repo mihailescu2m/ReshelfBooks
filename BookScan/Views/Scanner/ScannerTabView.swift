@@ -11,13 +11,13 @@ import os.log
 
 private let logger = Logger(subsystem: "com.bookscan", category: "Scanner")
 
-/// The card-style sheets the scanner can present. A single enum drives one
-/// `.sheet(item:)`, so we never have two presentations competing during a transition.
-/// ManualISBNEntryView is excluded here — it has its own separate sheet binding so
-/// its corner radius can be tuned per size class (see showingManualEntry below).
+/// All sheets the scanner can present. A single enum drives one `.sheet(item:)`,
+/// so SwiftUI never has two competing presentation state machines on the same view —
+/// which causes the first presentation to be immediately dismissed on iPad.
 enum ScannerSheet: Identifiable {
     case existingBook(Book, wasReturned: Bool)
     case newBook(BookMetadata)
+    case manualEntry(initialISBN: String?)
 
     var id: String {
         switch self {
@@ -25,6 +25,8 @@ enum ScannerSheet: Identifiable {
             return "existing-\(book.isbn)"
         case .newBook(let metadata):
             return "new-\(metadata.isbn)"
+        case .manualEntry(let isbn):
+            return "manual-\(isbn ?? "")"
         }
     }
 }
@@ -59,10 +61,6 @@ struct ScannerTabView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var lookupTask: Task<Void, Never>?
-    // Manual ISBN entry is a full-screen cover, not a card sheet, so it gets its own
-    // presentation state separate from the card-style `activeSheet`.
-    @State private var showingManualEntry = false
-    @State private var manualEntryISBN: String? = nil
 
     var body: some View {
         // No NavigationStack — this view is a page inside ContentView's page-style
@@ -107,21 +105,11 @@ struct ScannerTabView: View {
                 handleScannedCode(code)
             }
         }
+        // Single sheet modifier — two modifiers on the same view cause SwiftUI's
+        // internal presentation state machines to compete, producing an immediate
+        // auto-dismiss on the first presentation (reproducible on iPad simulator).
         .sheet(item: $activeSheet, onDismiss: handleSheetDismiss) { sheet in
             sheetContent(for: sheet)
-        }
-        // Use .sheet (not .fullScreenCover) so ManualISBNEntryView's presentation
-        // doesn't share the parent context — fullScreenCover on iPad shares the
-        // navigation context and causes a crash. On iPhone (compact size class) we
-        // remove the corner radius so it looks identical to a fullScreenCover; on
-        // iPad the system default radius is kept.
-        .sheet(isPresented: $showingManualEntry, onDismiss: handleManualEntryDismiss) {
-            ManualISBNEntryView(initialISBN: manualEntryISBN, onLookup: { isbn in
-                pendingAction = .lookup(isbn)
-                showingManualEntry = false
-            })
-            .presentationDetents([.large])
-            .presentationCornerRadius(horizontalSizeClass == .compact ? 0 : 12)
         }
     }
 
@@ -161,6 +149,17 @@ struct ScannerTabView: View {
             }, onManualEntry: {
                 transitionToManualEntry()
             })
+        case .manualEntry(let isbn):
+            // Use .sheet (not .fullScreenCover) so this doesn't share the parent
+            // navigation context — fullScreenCover on iPad causes a crash. On iPhone
+            // (compact) remove the corner radius so it looks like a full-screen cover;
+            // on iPad keep the default radius.
+            ManualISBNEntryView(initialISBN: isbn, onLookup: { lookupISBN in
+                pendingAction = .lookup(lookupISBN)
+                activeSheet = nil
+            })
+            .presentationDetents([.large])
+            .presentationCornerRadius(horizontalSizeClass == .compact ? 0 : 12)
         }
     }
 
@@ -206,8 +205,7 @@ struct ScannerTabView: View {
     private var enterISBNButton: some View {
         Button {
             isScanning = false
-            manualEntryISBN = scannedCode
-            showingManualEntry = true
+            activeSheet = .manualEntry(initialISBN: scannedCode)
         } label: {
             HStack {
                 Image(systemName: "keyboard")
@@ -235,26 +233,11 @@ struct ScannerTabView: View {
         switch pendingAction {
         case .showManualEntry(let isbn):
             pendingAction = nil
-            manualEntryISBN = isbn
-            showingManualEntry = true
+            activeSheet = .manualEntry(initialISBN: isbn)
         case .lookup(let isbn):
             pendingAction = nil
             handleScannedCode(isbn)
         case nil:
-            resetScanner()
-        }
-    }
-
-    private func handleManualEntryDismiss() {
-        switch pendingAction {
-        case .lookup(let isbn):
-            pendingAction = nil
-            handleScannedCode(isbn)
-        case nil:
-            resetScanner()
-        default:
-            // .showManualEntry isn't triggered from within manual entry
-            pendingAction = nil
             resetScanner()
         }
     }
@@ -353,8 +336,6 @@ struct ScannerTabView: View {
         lookupTask = nil
         scannedCode = nil
         activeSheet = nil
-        showingManualEntry = false
-        manualEntryISBN = nil
         pendingAction = nil
         errorMessage = nil
         isLoading = false

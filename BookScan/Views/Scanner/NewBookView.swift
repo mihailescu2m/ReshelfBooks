@@ -40,7 +40,7 @@ struct NewBookView: View {
                 Text("New Book").font(.headline)
                 HStack { Button("Cancel") { dismiss() }; Spacer() }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 24)
             .padding(.vertical, 12)
             Divider()
             ScrollView {

@@ -47,7 +47,7 @@ struct WebCoverSearchView: View {
                     Spacer()
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 24)
             .padding(.vertical, 12)
             Divider()
             Group {

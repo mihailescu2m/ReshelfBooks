@@ -21,7 +21,7 @@ struct BookDetailView: View {
                 Text("Book Details").font(.headline)
                 HStack { Spacer(); Button("Done") { dismiss() } }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 24)
             .padding(.vertical, 12)
             Divider()
             BookDetailContent(book: book, shelves: shelves) { dismiss() }
