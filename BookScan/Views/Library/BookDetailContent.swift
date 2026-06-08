@@ -16,18 +16,6 @@ struct BookDetailContent: View {
     let shelves: [Shelf]
     let onDelete: (() -> Void)?
 
-    // Half-sheet detent heights are computed deterministically from the button count
-    // (see halfSheetHeight) rather than measured at runtime. A measured height only
-    // becomes available *after* the sheet is presented, and an iPad form sheet does not
-    // reliably resize once it's on screen — so it would stay stuck at its seed and clip
-    // taller content (this is what cramped the cover sheet). A computed height is known
-    // at presentation time, so the card is the right size immediately, on iPhone and iPad.
-    //
-    // The pieces are @ScaledMetric so the detent grows with Dynamic Type along with the
-    // text it's sizing around.
-    @ScaledMetric(relativeTo: .headline) private var sheetTitleHeight: CGFloat = 22
-    @ScaledMetric(relativeTo: .subheadline) private var sheetMessageHeight: CGFloat = 20
-    @ScaledMetric(relativeTo: .body) private var sheetButtonHeight: CGFloat = 50
     // Single presentation binding — one .sheet(item:) avoids having multiple
     // presentation state machines on the same view, which causes the first
     // presentation to auto-dismiss (reproducible on iPad).
@@ -100,7 +88,7 @@ struct BookDetailContent: View {
                     .shadow(radius: 8)
 
                 Button {
-                    activeSheet = .imagePicker
+                    activeSheet = .imagePicker(hasCover: book.coverImageData != nil)
                 } label: {
                     Image(systemName: "camera.fill")
                         .font(.system(size: 14, weight: .semibold))
@@ -314,23 +302,25 @@ struct BookDetailContent: View {
         UIDevice.current.userInterfaceIdiom == .pad
     }
 
-    /// Detent height for a half-sheet with a centered title + one-line message and
-    /// `buttonCount` full-width pill buttons (the option buttons plus Cancel). Mirrors
-    /// the layout in ConfirmationSheet / CoverSourceSheet exactly:
-    ///
-    ///   topPad(16) + headerTopPad(4) + title + headerSpacing(8) + message
-    ///   + buttonCount × (button + outerSpacing(12)) + bottomPad(8 [+8 on iPad])
-    ///
-    /// Computed (not measured) so the value exists at presentation time — an iPad form
-    /// sheet won't resize after it's shown, so the height must be right up front.
-    private func halfSheetHeight(buttonCount: Int) -> CGFloat {
-        let topPadding: CGFloat = 16 + 4
-        let headerSpacing: CGFloat = 8
-        let outerSpacing: CGFloat = 12
-        let bottomPadding: CGFloat = 8 + (isIPad ? 8 : 0)
-        let header = sheetTitleHeight + headerSpacing + sheetMessageHeight
-        let buttons = CGFloat(buttonCount) * (sheetButtonHeight + outerSpacing)
-        return topPadding + header + buttons + bottomPadding
+    /// The active window's bottom safe-area inset — non-zero only on devices with a home
+    /// indicator (Face-ID iPhones).
+    private var bottomSafeInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?
+            .safeAreaInsets.bottom ?? 0
+    }
+
+    /// Bottom padding for the half-sheets:
+    /// - iPad: a centered card with no home indicator, so it needs real bottom padding to
+    ///   balance the top and keep the last pill clear of the rounded corner.
+    /// - Face-ID iPhone: the system already reserves the home-indicator strip below the
+    ///   sheet, so adding our own padding would just make the bottom look heavier — use 0.
+    /// - Touch-ID iPhone (no home indicator): a small fixed pad so the pill isn't flush.
+    private var sheetBottomPadding: CGFloat {
+        if isIPad { return 24 }
+        return bottomSafeInset > 0 ? 0 : 16
     }
 
     @ViewBuilder
@@ -342,11 +332,8 @@ struct BookDetailContent: View {
                 message: "This action cannot be undone.",
                 actionLabel: "Delete",
                 actionRole: .destructive,
-                extraBottomPadding: isIPad ? 8 : 0
+                bottomPadding: sheetBottomPadding
             ) { deleteBook() }
-            // 2 buttons: the action + Cancel.
-            .presentationDetents([.height(halfSheetHeight(buttonCount: 2))])
-            .presentationCornerRadius(24)
 
         case .lendConfirmation:
             ConfirmationSheet(
@@ -354,10 +341,8 @@ struct BookDetailContent: View {
                 message: "This book will be moved to the Lent shelf.",
                 actionLabel: "Lend",
                 actionRole: nil,
-                extraBottomPadding: isIPad ? 8 : 0
+                bottomPadding: sheetBottomPadding
             ) { lendBook() }
-            .presentationDetents([.height(halfSheetHeight(buttonCount: 2))])
-            .presentationCornerRadius(24)
 
         case .returnConfirmation:
             ConfirmationSheet(
@@ -365,23 +350,17 @@ struct BookDetailContent: View {
                 message: "This book will be returned to its original shelf.",
                 actionLabel: "Return",
                 actionRole: nil,
-                extraBottomPadding: isIPad ? 8 : 0
+                bottomPadding: sheetBottomPadding
             ) { returnBook() }
-            .presentationDetents([.height(halfSheetHeight(buttonCount: 2))])
-            .presentationCornerRadius(24)
 
-        case .imagePicker:
-            let hasCover = book.coverImageData != nil
+        case .imagePicker(let hasCover):
             CoverSourceSheet(
                 hasCover: hasCover,
-                extraBottomPadding: isIPad ? 8 : 0
+                bottomPadding: sheetBottomPadding
             ) { source in
                 pendingCoverSource = source
                 activeSheet = nil
             }
-            // 3 source options + (Remove Cover when present) + Cancel.
-            .presentationDetents([.height(halfSheetHeight(buttonCount: hasCover ? 5 : 4))])
-            .presentationCornerRadius(24)
 
         case .camera:
             ImagePicker(selectedImage: $selectedImage, sourceType: .camera)
@@ -456,16 +435,22 @@ struct BookDetailContent: View {
 ///
 /// Both the confirm and cancel actions use the same full-width pill shape.
 /// The drag indicator is intentionally hidden — Cancel is the explicit exit.
+///
+/// Sizing: every element is pinned to a fixed height (see SheetMetrics) and the `.height`
+/// detent is computed from those exact heights, so the card fits the content with no slack.
+/// The earlier gap came from computing the detent from constants while letting the elements
+/// render at their smaller *natural* heights — here the elements are forced to match.
 private struct ConfirmationSheet: View {
     @Environment(\.dismiss) private var dismiss
+    private let metrics = SheetMetrics()
 
     let title: String
     let message: String
     let actionLabel: String
     let actionRole: ButtonRole?
-    /// Extra bottom padding. Pass isIPad ? 8 : 0 from the parent — size-class
-    /// checks inside this sheet resolve to .compact on iPad's narrow form panel.
-    var extraBottomPadding: CGFloat = 0
+    /// Bottom padding inside the card. Computed by the parent (see sheetBottomPadding) so it
+    /// doesn't double up on the home-indicator safe area.
+    var bottomPadding: CGFloat = 0
     let onConfirm: () -> Void
 
     private var actionColor: Color {
@@ -473,53 +458,94 @@ private struct ConfirmationSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            VStack(spacing: 8) {
-                Text(title)
-                    .font(.headline)
-                Text(message)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.top, 4)
+        VStack(spacing: SheetMetrics.outerSpacing) {
+            metrics.header(title: title, message: message)
 
-            // Primary action
-            Button(role: actionRole) {
+            metrics.pillButton(actionLabel, fill: actionColor, weight: .semibold, role: actionRole) {
                 dismiss()
                 onConfirm()
-            } label: {
-                Text(actionLabel)
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(actionColor)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.plain)
 
-            // Cancel — same shape, neutral grey so it reads as secondary
-            Button {
+            // Cancel — neutral grey so it reads as secondary.
+            metrics.pillButton("Cancel", fill: Color(.systemGray5), foreground: .primary, weight: .medium) {
                 dismiss()
-            } label: {
-                Text("Cancel")
-                    .font(.body.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color(.systemGray5))
-                    .foregroundStyle(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
-        .padding(.top, 16)
-        .padding(.bottom, 8 + extraBottomPadding)
-        // Pin to the top of the detent so any rounding slack between the computed
-        // detent height and the rendered content lands at the bottom rather than
-        // centering the content (which would leave gaps above the title and below Cancel).
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, SheetMetrics.topPadding)
+        .padding(.bottom, bottomPadding)
+        .frame(maxWidth: .infinity)
+        // 2 buttons: the action + Cancel.
+        .presentationDetents([.height(metrics.height(buttonCount: 2, bottomPadding: bottomPadding))])
+        .presentationCornerRadius(24)
+        .presentationDragIndicator(.hidden)
+    }
+}
+
+// MARK: - Shared Half-Sheet Metrics
+
+/// Fixed-height building blocks shared by ConfirmationSheet and CoverSourceSheet, plus the
+/// matching detent-height calculation. Because the views and the calculation use the *same*
+/// constants — and every element is pinned to those heights — the computed `.height` detent
+/// equals the rendered content exactly, so there's no dead space.
+///
+/// The text/button heights are @ScaledMetric so they grow with Dynamic Type along with the
+/// content; titles and messages are kept to one line (shrinking slightly if needed) so their
+/// height stays fixed and the math stays exact. Conforms to DynamicProperty so SwiftUI keeps
+/// the @ScaledMetric values updated even though this lives as a plain property of the sheet.
+private struct SheetMetrics: DynamicProperty {
+    static let topPadding: CGFloat = 20      // space above the title
+    static let headerSpacing: CGFloat = 8    // title ↔ message
+    static let outerSpacing: CGFloat = 12    // between header and each button
+
+    @ScaledMetric(relativeTo: .headline) var titleHeight: CGFloat = 22
+    @ScaledMetric(relativeTo: .subheadline) var messageHeight: CGFloat = 20
+    @ScaledMetric(relativeTo: .body) var buttonHeight: CGFloat = 50
+
+    /// Detent height = top padding + header + buttonCount×(button + spacing) + bottom padding.
+    func height(buttonCount: Int, bottomPadding: CGFloat) -> CGFloat {
+        let header = titleHeight + Self.headerSpacing + messageHeight
+        let buttons = CGFloat(buttonCount) * (buttonHeight + Self.outerSpacing)
+        return Self.topPadding + header + buttons + bottomPadding
+    }
+
+    /// Centered title + one-line message, each pinned to a fixed height.
+    func header(title: String, message: String) -> some View {
+        VStack(spacing: Self.headerSpacing) {
+            Text(title)
+                .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(height: titleHeight)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(height: messageHeight)
+        }
+    }
+
+    /// Full-width pill button of fixed height.
+    func pillButton(
+        _ label: String,
+        fill: Color,
+        foreground: Color = .white,
+        weight: Font.Weight,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            Text(label)
+                .font(.body.weight(weight))
+                .frame(maxWidth: .infinity)
+                .frame(height: buttonHeight)
+                .background(fill)
+                .foregroundStyle(foreground)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -531,20 +557,26 @@ private enum BookDetailSheet: Identifiable {
     case deleteConfirmation
     case lendConfirmation
     case returnConfirmation
-    case imagePicker
+    // hasCover is captured at tap time so every sheetContent re-evaluation
+    // (including SwiftUI reconciliation passes) uses the same stable value.
+    // Reading book.coverImageData inside sheetContent instead would race with
+    // async cover downloads: the view reconciles (no Remove Cover button) but
+    // presentationDetents on an already-presented sheet stays locked at the
+    // stale height.
+    case imagePicker(hasCover: Bool)
     case camera
     case photoLibrary
     case webSearch
 
     var id: String {
         switch self {
-        case .deleteConfirmation:  return "deleteConfirmation"
-        case .lendConfirmation:    return "lendConfirmation"
-        case .returnConfirmation:  return "returnConfirmation"
-        case .imagePicker:         return "imagePicker"
-        case .camera:              return "camera"
-        case .photoLibrary:        return "photoLibrary"
-        case .webSearch:           return "webSearch"
+        case .deleteConfirmation:       return "deleteConfirmation"
+        case .lendConfirmation:         return "lendConfirmation"
+        case .returnConfirmation:       return "returnConfirmation"
+        case .imagePicker(let hasCover): return "imagePicker-\(hasCover)"
+        case .camera:                   return "camera"
+        case .photoLibrary:             return "photoLibrary"
+        case .webSearch:                return "webSearch"
         }
     }
 }
@@ -561,65 +593,39 @@ private enum CoverSource {
 /// selection is reported via `onSelect` and performed in the parent's onDismiss.
 private struct CoverSourceSheet: View {
     @Environment(\.dismiss) private var dismiss
+    private let metrics = SheetMetrics()
 
     let hasCover: Bool
-    /// See ConfirmationSheet.extraBottomPadding for why this is passed from the parent.
-    var extraBottomPadding: CGFloat = 0
+    /// See ConfirmationSheet.bottomPadding for why this is passed from the parent.
+    var bottomPadding: CGFloat = 0
     let onSelect: (CoverSource) -> Void
 
-    var body: some View {
-        VStack(spacing: 12) {
-            VStack(spacing: 8) {
-                Text("Change Cover Image")
-                    .font(.headline)
-                Text("Select image source from below.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.top, 4)
+    /// 3 source options + (Remove Cover when present) + Cancel.
+    private var buttonCount: Int { hasCover ? 5 : 4 }
 
-            optionButton("Take Photo") { onSelect(.camera) }
-            optionButton("Choose from Library") { onSelect(.library) }
-            optionButton("Search the Web") { onSelect(.web) }
+    var body: some View {
+        VStack(spacing: SheetMetrics.outerSpacing) {
+            metrics.header(title: "Change Cover Image", message: "Select image source from below.")
+
+            metrics.pillButton("Take Photo", fill: .accentColor, weight: .semibold) { onSelect(.camera) }
+            metrics.pillButton("Choose from Library", fill: .accentColor, weight: .semibold) { onSelect(.library) }
+            metrics.pillButton("Search the Web", fill: .accentColor, weight: .semibold) { onSelect(.web) }
             if hasCover {
-                optionButton("Remove Cover", role: .destructive) { onSelect(.remove) }
+                metrics.pillButton("Remove Cover", fill: .red, weight: .semibold, role: .destructive) { onSelect(.remove) }
             }
 
             // Cancel — neutral grey, matches ConfirmationSheet's Cancel.
-            Button {
+            metrics.pillButton("Cancel", fill: Color(.systemGray5), foreground: .primary, weight: .medium) {
                 dismiss()
-            } label: {
-                Text("Cancel")
-                    .font(.body.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color(.systemGray5))
-                    .foregroundStyle(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
-        .padding(.top, 16)
-        .padding(.bottom, 8 + extraBottomPadding)
-        // See ConfirmationSheet — top-anchor so any rounding slack lands at the bottom
-        // instead of centering the content.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-
-    @ViewBuilder
-    private func optionButton(_ label: String, role: ButtonRole? = nil, action: @escaping () -> Void) -> some View {
-        Button(role: role, action: action) {
-            Text(label)
-                .font(.body.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(role == .destructive ? Color.red : Color.accentColor)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .buttonStyle(.plain)
+        .padding(.top, SheetMetrics.topPadding)
+        .padding(.bottom, bottomPadding)
+        .frame(maxWidth: .infinity)
+        .presentationDetents([.height(metrics.height(buttonCount: buttonCount, bottomPadding: bottomPadding))])
+        .presentationCornerRadius(24)
+        .presentationDragIndicator(.hidden)
     }
 }
 
