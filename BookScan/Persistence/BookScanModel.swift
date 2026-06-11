@@ -50,7 +50,10 @@ extension PersistenceController {
             attribute("yearPublished", .stringAttributeType, optional: false, defaultValue: ""),
             attribute("coverImageURL", .stringAttributeType, optional: true),
             attribute("coverImageData", .binaryDataAttributeType, optional: true, allowsExternalStorage: true),
-            attribute("dateAdded", .dateAttributeType, optional: true)
+            attribute("dateAdded", .dateAttributeType, optional: true),
+            // Join-time contribution tag (see Book.contributedBy). NOTE: new fields
+            // must be deployed to the Production CloudKit schema before release.
+            attribute("contributedBy", .stringAttributeType, optional: true)
         ]
 
         // MARK: Relationships (created in pairs, then linked as inverses)

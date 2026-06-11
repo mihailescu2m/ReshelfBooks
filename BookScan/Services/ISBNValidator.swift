@@ -31,6 +31,18 @@ enum ISBNValidator {
         }
     }
 
+    /// Canonical ISBN-13 form, for storage and matching: a valid ISBN-10 is converted
+    /// ("978" prefix + recomputed check digit); everything else is returned normalized
+    /// but otherwise unchanged. The camera always delivers EAN-13 while manual entry
+    /// also accepts ISBN-10, so both must collapse to a single form — otherwise the
+    /// same physical book gets a second record when entered both ways.
+    static func canonicalize(_ raw: String) -> String {
+        let value = normalize(raw)
+        guard value.count == 10, isValidISBN10(value) else { return value }
+        let first12 = "978" + value.prefix(9)
+        return first12 + String(isbn13CheckDigit(for: first12))
+    }
+
     // MARK: - Check-digit math
 
     private static func isValidISBN10(_ value: String) -> Bool {
@@ -56,6 +68,14 @@ enum ISBNValidator {
         }
 
         return sum % 11 == 0
+    }
+
+    /// ISBN-13 check digit for the first 12 digits (weights 1,3,1,3…).
+    private static func isbn13CheckDigit(for first12: String) -> Int {
+        let sum = first12.enumerated().reduce(0) { partial, element in
+            partial + (element.element.wholeNumberValue ?? 0) * (element.offset % 2 == 0 ? 1 : 3)
+        }
+        return (10 - sum % 10) % 10
     }
 
     private static func isValidISBN13(_ value: String) -> Bool {

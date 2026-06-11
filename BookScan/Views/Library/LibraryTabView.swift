@@ -30,6 +30,12 @@ struct LibraryTabView: View {
     @State private var isPreparingShare = false
     @State private var shareUnavailable = false
 
+    // Active-store filter: while participating in a shared library only its shelves
+    // and books are shown; the user's own private books stay parked out of sight
+    // until the share ends (and Core Data forbids relating objects across stores).
+    private var visibleShelves: [Shelf] { persistence.visibleOnly(shelves) }
+    private var visibleBooks: [Book] { persistence.visibleOnly(books) }
+
     var body: some View {
         // No NavigationStack — this view is a page inside ContentView's page-style
         // TabView (backed by UIPageViewController). Wrapping each tab in its own
@@ -49,7 +55,7 @@ struct LibraryTabView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .newShelfAlert(isPresented: $showingNewShelfAlert)
             .sheet(item: $selectedBook) { book in
-                BookDetailView(book: book, shelves: Array(shelves))
+                BookDetailView(book: book, shelves: visibleShelves)
                     .presentationDetents([.large])
                     .presentationSizing(.page)
             }
@@ -118,28 +124,33 @@ struct LibraryTabView: View {
         persistence.ckContainer.accountStatus { status, _ in
             DispatchQueue.main.async {
                 guard status == .available else {
-                    isPreparingShare = false
                     if retryCount == 0 {
+                        // Keep isPreparingShare true through the retry window so a
+                        // second tap can't start an overlapping share flow meanwhile.
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            isPreparingShare = false
                             presentSharing(retryCount: 1)
                         }
                     } else {
+                        isPreparingShare = false
                         shareUnavailable = true
                     }
                     return
                 }
                 persistence.prepareShare(for: library) { share in
-                    isPreparingShare = false
                     guard let share else {
                         if retryCount == 0 {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                isPreparingShare = false
                                 presentSharing(retryCount: 1)
                             }
                         } else {
+                            isPreparingShare = false
                             shareUnavailable = true
                         }
                         return
                     }
+                    isPreparingShare = false
                     SharingPresenter.present(
                         share: share,
                         container: persistence.ckContainer,
@@ -153,7 +164,7 @@ struct LibraryTabView: View {
     /// Nothing to display anywhere: no regular shelves and no books at all
     /// (lent books still render in the lending section, so they count).
     private var isLibraryEmpty: Bool {
-        shelves.regularShelves.isEmpty && books.isEmpty
+        visibleShelves.regularShelves.isEmpty && visibleBooks.isEmpty
     }
 
     private var emptyLibraryView: some View {
@@ -170,18 +181,11 @@ struct LibraryTabView: View {
         }
     }
 
-    /// The lending shelf to display, preferring the one in the same persistent store as
-    /// the active library. This mirrors the store-scoping in
-    /// `PersistenceController.lendingShelf` so the shelf shown in the UI is always the
-    /// same shelf that receives lent books — avoiding a split-brain situation where the
-    /// UI shows a private-store lending shelf (empty) while lent books land on the
-    /// shared-store one (hidden).
+    /// The lending shelf to display. `visibleShelves` is already scoped to the active
+    /// library's store — the same scoping `PersistenceController.lendingShelf` uses —
+    /// so the shelf shown here is always the one that receives lent books.
     private var activeLendingShelf: Shelf? {
-        let activeStore = persistence.activeLibrary(creatingIfNeeded: false)?.objectID.persistentStore
-        let preferred = shelves
-            .filter { $0.isLendingShelf && (activeStore == nil || $0.objectID.persistentStore === activeStore) }
-            .min { ($0.dateCreated ?? .distantFuture) < ($1.dateCreated ?? .distantFuture) }
-        return preferred ?? shelves.lendingShelf   // fallback: no store info yet
+        visibleShelves.lendingShelf
     }
 
     private var libraryContentView: some View {
@@ -198,7 +202,7 @@ struct LibraryTabView: View {
                 }
 
                 // Regular shelves
-                ForEach(shelves.regularShelves) { shelf in
+                ForEach(visibleShelves.regularShelves) { shelf in
                     ShelfSectionView(
                         shelf: shelf,
                         onBookTap: { book in
@@ -222,7 +226,7 @@ struct LibraryTabView: View {
     }
 
     private var unshelvedBooks: [Book] {
-        books.filter { $0.shelf == nil }
+        visibleBooks.filter { $0.shelf == nil }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 

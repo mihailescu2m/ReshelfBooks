@@ -144,7 +144,7 @@ struct ScannerTabView: View {
                 transitionToManualEntry()
             })
         case .newBook(let metadata):
-            NewBookView(metadata: metadata, shelves: Array(shelves), onSave: { shelf, coverImage in
+            NewBookView(metadata: metadata, shelves: persistence.visibleOnly(shelves), onSave: { shelf, coverImage in
                 saveNewBook(metadata: metadata, shelf: shelf, coverImage: coverImage)
             }, onManualEntry: {
                 transitionToManualEntry()
@@ -245,7 +245,14 @@ struct ScannerTabView: View {
     // MARK: - Scan handling
 
     private func handleScannedCode(_ code: String) {
-        if let book = books.first(where: { $0.isbn == code }) {
+        // Canonicalize to ISBN-13 on BOTH sides of the comparison: the camera always
+        // delivers EAN-13, but a book entered by hand may be stored as ISBN-10 (and
+        // participant-store books can predate the owner-side bootstrap migration).
+        let isbn = ISBNValidator.canonicalize(code)
+        // Match only against the active library's books: a private book parked while
+        // participating in a shared library shouldn't block adding the same title to
+        // the family library (and its hidden shelf couldn't be shown anyway).
+        if let book = persistence.visibleOnly(books).first(where: { ISBNValidator.canonicalize($0.isbn) == isbn }) {
             // Scanning a lent book returns it (per the lending shelf's instructions).
             if book.isLent {
                 book.returnBook()
@@ -255,11 +262,23 @@ struct ScannerTabView: View {
                 activeSheet = .existingBook(book, wasReturned: false)
             }
         } else {
-            lookupBook(isbn: code)
+            lookupBook(isbn: isbn)
         }
     }
 
     private func lookupBook(isbn: String) {
+        // An EAN-13 outside the "Bookland" 978/979 prefixes is a product barcode, not
+        // an ISBN — say so instead of running five doomed catalog lookups. Unlike the
+        // network-error path below, scanning is NOT resumed here: this guard fails
+        // instantly, so resuming with the same barcode still in frame would re-detect
+        // it several times a second (haptic buzzing, banner flicker). The camera is
+        // already stopped; the banner's ✕ runs resetScanner() and resumes cleanly.
+        if isbn.count == 13 && !isbn.hasPrefix("978") && !isbn.hasPrefix("979") {
+            errorMessage = "This barcode isn't a book ISBN."
+            scannedCode = nil
+            return
+        }
+
         isLoading = true
         errorMessage = nil
 
@@ -314,8 +333,10 @@ struct ScannerTabView: View {
                         return
                     }
                     await MainActor.run {
-                        // The user may have deleted the book while the cover downloaded.
-                        guard !book.isDeleted else { return }
+                        // The book may be gone by now: deleted by the user (or a family
+                        // member, merged in with a nil context), or rolled back by a
+                        // failed save — writing to it then would crash or be lost.
+                        guard !book.isGone else { return }
                         book.coverImageData = imageData
                         persistence.save()
                     }

@@ -19,6 +19,14 @@ struct BookMetadata {
     let coverImageURL: String?
 }
 
+/// One distinct description of an ISBN as returned by the metadata sources, with the
+/// names of every source that agrees on it. Backs the "Edit Book" picker, which lets
+/// the user replace wrong details with another source's answer.
+struct EditionDescription {
+    let metadata: BookMetadata
+    let sources: [String]
+}
+
 enum ISBNLookupError: Error, LocalizedError {
     case networkError(Error)
     case notFound
@@ -87,15 +95,24 @@ actor ISBNLookupService {
     func lookupBook(isbn: String) async throws -> BookMetadata {
         let cleanISBN = ISBNValidator.normalize(isbn)
 
-        // Primary 1: Open Library catalog API.
-        if let result = try? await lookupFromOpenLibrary(isbn: cleanISBN) {
-            return await ensureCoverImage(for: result)
+        // Remember when a source failed because the network itself was unreachable, so
+        // the final error says "network problem" rather than the misleading "not found".
+        var connectivityError: Error?
+        func noteFailure(_ error: Error) {
+            if Self.isConnectivityError(error) { connectivityError = error }
         }
 
-        // Primary 2: Google Books.
-        if let result = try? await lookupFromGoogleBooks(isbn: cleanISBN) {
+        // Primary 1: Open Library catalog API.
+        do {
+            let result = try await lookupFromOpenLibrary(isbn: cleanISBN)
             return await ensureCoverImage(for: result)
-        }
+        } catch { noteFailure(error) }
+
+        // Primary 2: Google Books.
+        do {
+            let result = try await lookupFromGoogleBooks(isbn: cleanISBN)
+            return await ensureCoverImage(for: result)
+        } catch { noteFailure(error) }
 
         // Both primaries missed — fan the three fallbacks out concurrently. The actor
         // suspends at each URLSession await, so the three requests genuinely overlap.
@@ -106,17 +123,94 @@ actor ISBNLookupService {
 
         // Await in priority order and return the first hit (stop-at-first-hit semantics,
         // just with the network work already running in parallel).
-        if let result = try? await openLibrarySearch {
+        do {
+            let result = try await openLibrarySearch
             return await ensureCoverImage(for: result)
-        }
-        if let result = try? await crossref {
+        } catch { noteFailure(error) }
+        do {
+            let result = try await crossref
             return await ensureCoverImage(for: result)
-        }
-        if let result = try? await libraryOfCongress {
+        } catch { noteFailure(error) }
+        do {
+            let result = try await libraryOfCongress
             return await ensureCoverImage(for: result)
-        }
+        } catch { noteFailure(error) }
 
+        if let connectivityError {
+            throw ISBNLookupError.networkError(connectivityError)
+        }
         throw ISBNLookupError.notFound
+    }
+
+    /// Queries ALL metadata sources for this ISBN concurrently and returns every
+    /// distinct description found, in the same priority order as `lookupBook`. Unlike
+    /// `lookupBook` this never stops at the first hit — it exists so the user can pick
+    /// the best description when the source that answered first got the details wrong.
+    /// An ISBN identifies a single edition, so these are competing descriptions of the
+    /// same book, not different editions.
+    func lookupAllDescriptions(isbn: String) async -> [EditionDescription] {
+        let cleanISBN = ISBNValidator.normalize(isbn)
+
+        // All five sources fan out concurrently (the actor suspends at each URLSession
+        // await, so the requests overlap); a failed source simply contributes nothing.
+        async let openLibrary       = lookupFromOpenLibrary(isbn: cleanISBN)
+        async let googleBooks       = lookupFromGoogleBooks(isbn: cleanISBN)
+        async let openLibrarySearch = lookupFromOpenLibrarySearch(isbn: cleanISBN)
+        async let crossref          = lookupFromCrossref(isbn: cleanISBN)
+        async let libraryOfCongress = lookupFromLibraryOfCongress(isbn: cleanISBN)
+
+        // Both Open Library endpoints carry the same public name; dedup merges them.
+        let results: [(source: String, metadata: BookMetadata?)] = [
+            ("Open Library", try? await openLibrary),
+            ("Google Books", try? await googleBooks),
+            ("Open Library", try? await openLibrarySearch),
+            ("Crossref", try? await crossref),
+            ("Library of Congress", try? await libraryOfCongress)
+        ]
+        let found = results.compactMap { result in
+            result.metadata.map { (source: result.source, metadata: $0) }
+        }
+        return Self.dedupedDescriptions(found)
+    }
+
+    /// Collapses per-source results into distinct descriptions: results agreeing on
+    /// (title, author, year) — compared case- and whitespace-insensitively — merge
+    /// into one entry listing every agreeing source. Input order is priority order:
+    /// the first occurrence supplies the canonical metadata and the output position.
+    static func dedupedDescriptions(_ results: [(source: String, metadata: BookMetadata)]) -> [EditionDescription] {
+        var keysInOrder: [String] = []
+        var grouped: [String: (metadata: BookMetadata, sources: [String])] = [:]
+
+        for (source, metadata) in results {
+            let key = [metadata.title, metadata.author, metadata.yearPublished]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .joined(separator: "|")
+            if var existing = grouped[key] {
+                if !existing.sources.contains(source) { existing.sources.append(source) }
+                grouped[key] = existing
+            } else {
+                grouped[key] = (metadata, [source])
+                keysInOrder.append(key)
+            }
+        }
+        return keysInOrder.compactMap { key in
+            grouped[key].map { EditionDescription(metadata: $0.metadata, sources: $0.sources) }
+        }
+    }
+
+    /// True for failures that mean the network is unreachable (as opposed to a source
+    /// simply not knowing the book). `timedOut` is included: with
+    /// `waitsForConnectivity = false` a dead connection commonly surfaces as a timeout.
+    private static func isConnectivityError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed,
+             .internationalRoamingOff, .cannotConnectToHost, .cannotFindHost,
+             .dnsLookupFailed, .timedOut:
+            return true
+        default:
+            return false
+        }
     }
 
     /// Searches for book cover images from multiple sources and returns up to maxResults URLs
@@ -267,13 +361,20 @@ actor ISBNLookupService {
 
         do {
             let (_, response) = try await session.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse,
-               httpResponse.statusCode == 200,
-               let contentLength = httpResponse.value(forHTTPHeaderField: "Content-Length"),
-               let length = Int(contentLength),
-               length > minimumImageSize {
-                return true
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                return false
             }
+            // Size check filters out tiny placeholder images (e.g. Open Library's
+            // 1x1 "no cover" GIF), so prefer it whenever the server reports a length.
+            if let contentLength = httpResponse.value(forHTTPHeaderField: "Content-Length"),
+               let length = Int(contentLength) {
+                return length > minimumImageSize
+            }
+            // No Content-Length (e.g. a chunked HEAD response): fall back to the
+            // content type so such servers aren't rejected outright.
+            let contentType = httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+            return contentType.hasPrefix("image/")
         } catch {
             logger.debug("Failed to validate image URL \(urlString): \(error.localizedDescription)")
         }
@@ -283,10 +384,26 @@ actor ISBNLookupService {
 
     // MARK: - Google Books API
 
+    /// Builds a URL string with properly escaped query values. `.urlQueryAllowed`
+    /// percent-encoding is NOT enough for free-text values: it leaves `&`, `=` and `+`
+    /// intact (each is legal *somewhere* in a query), so a title like
+    /// "Pride & Prejudice" would be cut off at the ampersand server-side.
+    /// URLComponents escapes the values correctly; the extra pass escapes `+`, which
+    /// URLComponents leaves alone but many servers decode as a space.
+    private static func queryURLString(base: String, items: [(String, String)]) -> String? {
+        guard var components = URLComponents(string: base) else { return nil }
+        components.queryItems = items.map { URLQueryItem(name: $0.0, value: $0.1) }
+        components.percentEncodedQuery = components.percentEncodedQuery?
+            .replacingOccurrences(of: "+", with: "%2B")
+        return components.url?.absoluteString
+    }
+
     /// Searches Google Books and returns cover image URLs
     private func searchGoogleBooks(query: String, maxResults: Int) async -> [String] {
-        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "https://www.googleapis.com/books/v1/volumes?q=\(encodedQuery)&maxResults=\(maxResults)"
+        guard let urlString = Self.queryURLString(
+            base: "https://www.googleapis.com/books/v1/volumes",
+            items: [("q", query), ("maxResults", String(maxResults))]
+        ) else { return [] }
 
         guard let json = try? await fetchJSON(urlString),
               let items = json["items"] as? [[String: Any]] else {
@@ -539,8 +656,10 @@ actor ISBNLookupService {
 
     /// Searches Open Library for book covers
     private func searchOpenLibrary(title: String, author: String, maxResults: Int) async -> [String] {
-        let query = "\(title) \(author)".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "https://openlibrary.org/search.json?q=\(query)&limit=\(maxResults)"
+        guard let urlString = Self.queryURLString(
+            base: "https://openlibrary.org/search.json",
+            items: [("q", "\(title) \(author)"), ("limit", String(maxResults))]
+        ) else { return [] }
 
         guard let json = try? await fetchJSON(urlString),
               let docs = json["docs"] as? [[String: Any]] else {

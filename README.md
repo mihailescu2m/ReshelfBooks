@@ -123,6 +123,8 @@ If BookScan saves you time or you just find it useful, a small donation is great
 3. **Sign the app**  
    In Xcode → *Signing & Capabilities*, select your Apple Developer team. Xcode will register the App ID and the CloudKit container (`iCloud.memeka.BookScan`) automatically on first build.
 
+   > **CloudKit schema deployment:** debug builds use the *Development* CloudKit environment; TestFlight/App Store builds use *Production*, whose schema is locked. After adding or changing a model field (most recently `Book.contributedBy`), run a debug build once so the field appears in Development, then open the [CloudKit Console](https://icloud.developer.apple.com) → `iCloud.memeka.BookScan` → **Deploy Schema Changes to Production** before shipping — otherwise Production saves of that field will fail.
+
 4. **Run on a device**  
    Select your iPhone or iPad as the run destination and press **⌘R**.  
    > A physical device is required for barcode scanning. The iOS simulator cannot access a camera.

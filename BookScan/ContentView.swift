@@ -31,15 +31,26 @@ struct ContentView: View {
             SearchView()
         }
         // Shown only after joining a shared library while the joiner still has local
-        // books that aren't part of it — never a silent delete.
+        // books: park them privately (hidden until the share ends) or move them in.
         .alert("Joined Shared Library", isPresented: Binding(
             get: { persistence.pendingJoinLocalBookCount != nil },
             set: { if !$0 { persistence.keepLocalDataAfterJoin() } }
         )) {
-            Button("Keep My Books") { persistence.keepLocalDataAfterJoin() }
-            Button("Delete My Books", role: .destructive) { persistence.discardLocalDataAfterJoin() }
+            Button("Keep My Books Private") { persistence.keepLocalDataAfterJoin() }
+            Button("Move Into Shared Library") { persistence.moveLocalBooksIntoSharedLibrary() }
         } message: {
             Text(joinPromptMessage)
+        }
+        // Shown when a participant leaves a shared library they had moved books into:
+        // bring those books back (with their current shelves) or leave them behind.
+        .alert("Left Shared Library", isPresented: Binding(
+            get: { persistence.pendingLeaveSnapshot != nil },
+            set: { if !$0 { persistence.discardLeaveSnapshot() } }
+        )) {
+            Button("Bring Them Back") { persistence.restoreContributedBooks() }
+            Button("Leave Them", role: .destructive) { persistence.discardLeaveSnapshot() }
+        } message: {
+            Text(leavePromptMessage)
         }
         // Shown when a share invitation is declined because the user already owns a
         // shared library of their own.
@@ -56,8 +67,15 @@ struct ContentView: View {
     private var joinPromptMessage: String {
         let count = persistence.pendingJoinLocalBookCount ?? 0
         let books = count == 1 ? "book" : "books"
-        return "You have \(count) \(books) that aren't part of the shared library. "
-            + "Keep them in your own library, or delete them?"
+        return "You have \(count) \(books) in your own library. "
+            + "Keep them private, or move them into the shared library?"
+    }
+
+    private var leavePromptMessage: String {
+        let count = persistence.pendingLeaveSnapshot?.count ?? 0
+        let books = count == 1 ? "book" : "books"
+        return "You brought \(count) \(books) into the shared library. "
+            + "Bring them back to your library?"
     }
 
     private var floatingTabBar: some View {

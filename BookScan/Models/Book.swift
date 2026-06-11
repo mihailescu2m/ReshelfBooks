@@ -18,6 +18,10 @@ public final class Book: NSManagedObject {
     @NSManaged public var coverImageURL: String?
     @NSManaged public var coverImageData: Data?
     @NSManaged public var dateAdded: Date?
+    /// ID of the participant who moved this book into a shared library at join time;
+    /// nil for books created directly. Lets that user take these books back when
+    /// leaving the share. Never shown in the UI.
+    @NSManaged public var contributedBy: String?
 
     // CloudKit requires every relationship to be optional and have an inverse.
     @NSManaged public var library: Library?

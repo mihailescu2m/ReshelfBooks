@@ -17,6 +17,26 @@ import os.log
 
 private let logger = Logger(subsystem: "com.bookscan", category: "Persistence")
 
+/// Value-type copy of a contributed book, captured at the moment a participant leaves
+/// a shared library — BEFORE CloudKit's zone purge deletes the local records — so the
+/// "Bring Them Back" prompt can rebuild the books at leisure. Shelves are recorded by
+/// name (with current lending state), since the shelf objects themselves die with the
+/// shared store.
+struct ContributedBookSnapshot {
+    let isbn: String
+    let title: String
+    let author: String
+    let yearPublished: String
+    let coverImageURL: String?
+    let coverImageData: Data?
+    let dateAdded: Date?
+    /// Current shelf name; nil when unshelved or lent.
+    let shelfName: String?
+    let isLent: Bool
+    /// The shelf to return to after lending; only set while lent.
+    let previousShelfName: String?
+}
+
 final class PersistenceController: ObservableObject {
 
     static let shared = PersistenceController()
@@ -39,9 +59,15 @@ final class PersistenceController: ObservableObject {
     @Published private(set) var isLibraryShared = false
 
     /// Set right after joining a shared library *if* the joiner still has local
-    /// (never-shared) books — its value is how many. Drives a Keep/Delete prompt.
-    /// `nil` means no prompt (the common case: nothing local to lose).
+    /// (never-shared) books — its value is how many. Drives a "Keep My Books Private /
+    /// Move Into Shared Library" prompt. `nil` means no prompt (the common case:
+    /// nothing local to decide about).
     @Published var pendingJoinLocalBookCount: Int?
+
+    /// Snapshot of the books this user contributed to a shared library, captured at
+    /// the moment they leave it (before the zone purge deletes the local copies).
+    /// Drives a "Bring Them Back / Leave Them" prompt; `nil` means no prompt.
+    @Published var pendingLeaveSnapshot: [ContributedBookSnapshot]?
 
     /// Non-nil when a share invitation was declined because this user already owns a
     /// shared library. Drives an explanatory alert.
@@ -59,6 +85,15 @@ final class PersistenceController: ObservableObject {
 
     /// UserDefaults key written by the toggle in the app's iOS Settings bundle.
     private static let resetFlagKey = "reset_all_data"
+    /// Set when the user chose "Move Into Shared Library" at join time. The shared
+    /// library may not have synced down yet, so the move stays armed (surviving
+    /// relaunches) until a shared-store library exists and the migration runs.
+    private static let pendingMoveKey = "pending_move_into_shared_library"
+    /// Cached CloudKit user record ID — stable per iCloud account, so books tagged on
+    /// one of the user's devices are recognized on all of them.
+    private static let userRecordIDKey = "cloudkit_user_record_id"
+    /// Per-install fallback tag, used only until the CloudKit ID has been fetched.
+    private static let localContributorIDKey = "local_contributor_id"
 
     init(inMemory: Bool = false) {
         self.inMemory = inMemory
@@ -147,26 +182,19 @@ final class PersistenceController: ObservableObject {
         }
     }
 
-    /// Erases all local and (best-effort) CloudKit data when the user toggled the reset
-    /// switch in iOS Settings. Runs once, before the stores load, then clears the flag.
+    /// Erases all local and CloudKit data when the user toggled the reset switch in
+    /// iOS Settings. Local store files are deleted immediately; the flag is cleared
+    /// only once the CloudKit zone purge has actually SUCCEEDED. A reset issued while
+    /// offline therefore stays armed and completes on a later launch, instead of the
+    /// old data quietly syncing back down. While armed, every launch starts from an
+    /// empty store — anything created in between is erased too, which is the intended
+    /// meaning of "reset everything" (the Settings toggle visibly stays on until done).
     private func eraseAllDataIfRequested() {
         let defaults = UserDefaults.standard
         guard defaults.bool(forKey: Self.resetFlagKey) else { return }
         logger.warning("Reset requested from Settings — erasing all local and CloudKit data")
 
-        // 1. Best-effort: delete the user's own (private database) CloudKit zones so the
-        //    data doesn't sync back down. Needs network; converges once online. We don't
-        //    touch zones owned by someone who shared a library with us (we can't anyway).
-        let database = ckContainer.privateCloudDatabase
-        database.fetchAllRecordZones { zones, _ in
-            guard let zones else { return }
-            let deletableIDs = zones.map(\.zoneID)
-                .filter { $0.zoneName != CKRecordZone.default().zoneID.zoneName }
-            guard !deletableIDs.isEmpty else { return }
-            database.add(CKModifyRecordZonesOperation(recordZonesToSave: nil, recordZoneIDsToDelete: deletableIDs))
-        }
-
-        // 2. Delete the local store files so this launch starts empty.
+        // 1. Delete the local store files so this launch starts empty.
         let base = NSPersistentContainer.defaultDirectoryURL()
         for store in ["BookScan.sqlite", "BookScan-shared.sqlite"] {
             for suffix in ["", "-wal", "-shm"] {
@@ -174,8 +202,28 @@ final class PersistenceController: ObservableObject {
             }
         }
 
-        // 3. Clear the flag so the reset only happens once.
-        defaults.set(false, forKey: Self.resetFlagKey)
+        // 2. Delete the user's own (private database) CloudKit zones so the data doesn't
+        //    sync back down. We can't touch zones owned by someone who shared a library
+        //    with us (and don't need to — those live in the shared store file).
+        let database = ckContainer.privateCloudDatabase
+        database.fetchAllRecordZones { zones, _ in
+            // Offline / fetch failed: leave the flag set so the next launch retries.
+            guard let zones else { return }
+            let deletableIDs = zones.map(\.zoneID)
+                .filter { $0.zoneName != CKRecordZone.default().zoneID.zoneName }
+            guard !deletableIDs.isEmpty else {
+                // Nothing to purge — the reset is complete.
+                defaults.set(false, forKey: Self.resetFlagKey)
+                return
+            }
+            let purge = CKModifyRecordZonesOperation(recordZonesToSave: nil, recordZoneIDsToDelete: deletableIDs)
+            purge.modifyRecordZonesResultBlock = { result in
+                if case .success = result {
+                    defaults.set(false, forKey: Self.resetFlagKey)
+                }
+            }
+            database.add(purge)
+        }
     }
 
     private func configureViewContext() {
@@ -206,7 +254,12 @@ final class PersistenceController: ObservableObject {
 
     private func scheduleSharedStateRefresh() {
         refreshWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.refreshSharedState() }
+        let item = DispatchWorkItem { [weak self] in
+            // The queued join-time move waits for the shared library to sync down,
+            // which announces itself via these same remote-change notifications.
+            self?.performPendingMoveIfPossible()
+            self?.refreshSharedState()
+        }
         refreshWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: item)
     }
@@ -256,6 +309,24 @@ final class PersistenceController: ObservableObject {
         NSEntityDescription.insertNewObject(forEntityName: entityName, into: viewContext)
     }
 
+    // MARK: - Visibility
+
+    /// The persistent store backing the active library: the shared store while
+    /// participating in someone else's library, the private store otherwise.
+    var activeStore: NSPersistentStore? {
+        activeLibrary(creatingIfNeeded: false).flatMap(store(for:)) ?? privateStore
+    }
+
+    /// Filters fetched objects down to the active library's store. While participating
+    /// in a shared library this parks the user's own private books out of sight (they
+    /// return automatically when the share ends) — and guarantees the UI can never
+    /// relate objects across stores, which Core Data forbids (such saves fail and
+    /// roll back silently).
+    func visibleOnly<T: NSManagedObject>(_ objects: some Sequence<T>) -> [T] {
+        guard let store = activeStore else { return Array(objects) }
+        return objects.filter { $0.objectID.persistentStore === store }
+    }
+
     // MARK: - Factories
     //
     // All creation goes through here so every new object is (a) attached to the
@@ -267,7 +338,14 @@ final class PersistenceController: ObservableObject {
     func makeShelf(name: String, isLendingShelf: Bool = false) -> Shelf {
         let library = activeLibrary(creatingIfNeeded: true)
         let targetStore = library.flatMap(store(for:)) ?? privateStore
+        return insertShelf(name: name, isLendingShelf: isLendingShelf, library: library, store: targetStore)
+    }
 
+    /// Core shelf creation with an explicit library/store target — used by `makeShelf`
+    /// (active library) and by the leave-share restore (private library, which can't
+    /// rely on `activeLibrary` while the shared store is still purging).
+    @discardableResult
+    private func insertShelf(name: String, isLendingShelf: Bool, library: Library?, store targetStore: NSPersistentStore?) -> Shelf {
         let shelf = insert("Shelf") as! Shelf
         if let targetStore { viewContext.assign(shelf, to: targetStore) }
         try? viewContext.obtainPermanentIDs(for: [shelf])
@@ -304,7 +382,9 @@ final class PersistenceController: ObservableObject {
         if let targetStore { viewContext.assign(book, to: targetStore) }
         try? viewContext.obtainPermanentIDs(for: [book])
         book.dateAdded = Date()
-        book.isbn = isbn
+        // Store the canonical ISBN-13 so a hand-typed ISBN-10 and a scanned EAN-13
+        // of the same book always match.
+        book.isbn = ISBNValidator.canonicalize(isbn)
         book.title = title
         book.author = author
         book.yearPublished = yearPublished
@@ -353,15 +433,21 @@ final class PersistenceController: ObservableObject {
         viewContext.delete(object)
     }
 
-    func save() {
-        guard viewContext.hasChanges else { return }
+    /// Saves the view context. Returns false when the save failed and was rolled
+    /// back, so flows that must not lose data on failure (join-time move, leave
+    /// restore) can keep their trigger armed instead of discarding the user's choice.
+    @discardableResult
+    func save() -> Bool {
+        guard viewContext.hasChanges else { return true }
         do {
             try viewContext.save()
+            return true
         } catch {
             logger.error("Save failed: \(error.localizedDescription)")
             // Roll back so invalid changes (e.g. a cross-store relationship) don't
             // accumulate in the context and cause every subsequent save to fail too.
             viewContext.rollback()
+            return false
         }
     }
 
@@ -378,6 +464,11 @@ final class PersistenceController: ObservableObject {
         // "not authenticated" error even when the user IS signed in.
         // Firing this here, at launch, means it's resolved long before the Share tap.
         if !inMemory { ckContainer.accountStatus { _, _ in } }
+
+        // Cache the CloudKit user ID used to tag contributed books, and finish a
+        // queued join-time move if the app was killed before it could run.
+        fetchUserRecordIDIfNeeded()
+        performPendingMoveIfPossible()
 
         // Participants (preferred library lives in the shared store) do no structural
         // maintenance — that avoids any multi-writer delete race on shared data.
@@ -439,6 +530,13 @@ final class PersistenceController: ObservableObject {
                 for book in Array(duplicate.previousBooks ?? []) { book.previousShelf = keep }
                 viewContext.delete(duplicate)
             }
+        }
+
+        // 4. Canonicalize legacy ISBN-10s to ISBN-13, so barcode scans (always EAN-13)
+        //    and ISBN searches match books that were originally entered by hand.
+        for book in privateBooks {
+            let canonical = ISBNValidator.canonicalize(book.isbn)
+            if book.isbn != canonical { book.isbn = canonical }
         }
 
         // NOTE: we deliberately do NOT auto-merge same-ISBN books. Two Book records with
@@ -560,6 +658,10 @@ final class PersistenceController: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if error == nil {
+                    // A fresh join always starts with a clean slate: a Move armed for a
+                    // PREVIOUS share that never completed must not fire against this one.
+                    // The prompt below re-arms it if the user picks Move again.
+                    UserDefaults.standard.set(false, forKey: Self.pendingMoveKey)
                     // Silently drop empty leftover scaffolding (a private library with
                     // no books, e.g. a lending shelf created before joining).
                     self.discardEmptyUnsharedLibraries()
@@ -585,29 +687,237 @@ final class PersistenceController: ObservableObject {
         }
     }
 
-    /// User chose to keep their local books after joining — just dismiss the prompt.
+    /// User chose to keep their local books private after joining — dismiss the
+    /// prompt and disarm any queued move (an explicit Keep overrides a Move armed for
+    /// an earlier share that never completed). The books stay in the private store,
+    /// hidden by the active-store visibility filter until the share ends, then
+    /// reappear automatically.
     func keepLocalDataAfterJoin() {
         pendingJoinLocalBookCount = nil
+        UserDefaults.standard.set(false, forKey: Self.pendingMoveKey)
     }
 
-    /// User chose to delete their local books after joining.
-    func discardLocalDataAfterJoin() {
-        discardUnsharedLocalData()
+    /// User chose to move their local books into the shared library. The shared
+    /// library may not have synced down yet (share acceptance completes before the
+    /// CloudKit import), so this only ARMS the move; `performPendingMoveIfPossible`
+    /// runs it — from the remote-change handler or next launch — once the destination
+    /// actually exists. The flag survives relaunches.
+    func moveLocalBooksIntoSharedLibrary() {
         pendingJoinLocalBookCount = nil
+        UserDefaults.standard.set(true, forKey: Self.pendingMoveKey)
+        performPendingMoveIfPossible()
     }
 
-    /// Deletes purely-local private libraries (and their shelves/books). A library
-    /// this user has shared out themselves is preserved, so an owner who also accepts
-    /// another share never loses their own library.
-    private func discardUnsharedLocalData() {
+    /// Runs the armed join-time migration if the shared library has synced down.
+    /// Safe to call repeatedly; no-ops unless armed and a destination exists.
+    ///
+    /// For every book in the user's unshared private libraries: re-create it in the
+    /// shared store (shelves matched or created by NAME so the user's organization
+    /// survives, lending state preserved), tag it with `contributedBy` so it can be
+    /// taken back on leaving, then delete the private original (a literal move).
+    func performPendingMoveIfPossible() {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: Self.pendingMoveKey) else { return }
+
         let libraries = (try? viewContext.fetch(Library.fetchRequestAll())) ?? []
-        for library in libraries where library.objectID.persistentStore === privateStore {
-            if existingShare(for: library) != nil { continue } // keep libraries we've shared
+        // Destination not imported yet — stay armed and try again on the next change.
+        guard libraries.contains(where: { $0.objectID.persistentStore === sharedStore }) else { return }
+
+        let sourceLibraries = libraries.filter {
+            $0.objectID.persistentStore === privateStore && existingShare(for: $0) == nil
+        }
+        let tag = contributorID
+        for library in sourceLibraries {
+            for book in Array(library.books ?? []) {
+                let targetShelf: Shelf?
+                var targetPreviousShelf: Shelf?
+                if book.isLent {
+                    targetShelf = lendingShelf(creatingIfNeeded: true)
+                    targetPreviousShelf = book.previousShelf.map { findOrCreateActiveShelf(named: $0.name) }
+                } else if let shelf = book.shelf {
+                    targetShelf = findOrCreateActiveShelf(named: shelf.name)
+                } else {
+                    targetShelf = nil
+                }
+                let moved = makeBook(
+                    isbn: book.isbn,
+                    title: book.title,
+                    author: book.author,
+                    yearPublished: book.yearPublished,
+                    coverImageURL: book.coverImageURL,
+                    shelf: targetShelf
+                )
+                moved.coverImageData = book.coverImageData
+                moved.dateAdded = book.dateAdded
+                moved.previousShelf = targetPreviousShelf
+                moved.contributedBy = tag
+            }
             for shelf in Array(library.shelves ?? []) { viewContext.delete(shelf) }
             for book in Array(library.books ?? []) { viewContext.delete(book) }
             viewContext.delete(library)
         }
-        save()
+        // Disarm only on a successful save. On failure everything was rolled back, so
+        // the books are still private (hidden) and the armed flag retries later —
+        // clearing it here would strand them invisible with no way to ever move.
+        if save() {
+            defaults.set(false, forKey: Self.pendingMoveKey)
+            logger.info("Moved local books into the shared library")
+        } else {
+            logger.error("Join-time move failed to save; staying armed for a retry")
+        }
+    }
+
+    /// A regular shelf with this name in the active library's store, creating it
+    /// there if needed — used by the join-time move so shelves carry over by name.
+    private func findOrCreateActiveShelf(named name: String) -> Shelf {
+        let store = activeStore
+        let existing = ((try? viewContext.fetch(Shelf.fetchRequestAll())) ?? [])
+            .filter { $0.objectID.persistentStore === store && !$0.isLendingShelf && $0.name == name }
+            .min { ($0.dateCreated ?? .distantFuture) < ($1.dateCreated ?? .distantFuture) }
+        return existing ?? makeShelf(name: name)
+    }
+
+    // MARK: - Contributor identity
+
+    /// Tag written onto contributed books: the CloudKit user record ID when known
+    /// (stable across all of this user's devices), else a per-install fallback.
+    private var contributorID: String {
+        UserDefaults.standard.string(forKey: Self.userRecordIDKey) ?? localContributorID
+    }
+
+    /// Every tag value this user may have written (CloudKit ID and/or the local
+    /// fallback used before that ID was fetched) — matched against on leave.
+    private var contributorIDs: Set<String> {
+        var ids: Set<String> = [localContributorID]
+        if let ckID = UserDefaults.standard.string(forKey: Self.userRecordIDKey) {
+            ids.insert(ckID)
+        }
+        return ids
+    }
+
+    private var localContributorID: String {
+        let defaults = UserDefaults.standard
+        if let id = defaults.string(forKey: Self.localContributorIDKey) { return id }
+        let id = UUID().uuidString
+        defaults.set(id, forKey: Self.localContributorIDKey)
+        return id
+    }
+
+    private func fetchUserRecordIDIfNeeded() {
+        guard !inMemory,
+              UserDefaults.standard.string(forKey: Self.userRecordIDKey) == nil else { return }
+        ckContainer.fetchUserRecordID { recordID, _ in
+            guard let recordID else { return }
+            UserDefaults.standard.set(recordID.recordName, forKey: Self.userRecordIDKey)
+        }
+    }
+
+    // MARK: - Leaving a shared library
+
+    /// Captures the books this user contributed at join time — with their CURRENT
+    /// shelf/lending state — so the "bring them back" prompt can rebuild them.
+    ///
+    /// MUST run synchronously from the sharing sheet's didStopSharing delegate: the
+    /// zone purge that follows a leave deletes the local shared-store records, so this
+    /// is the only reliable moment the data still exists. If the OWNER revokes access
+    /// remotely there is no callback and no snapshot — those books stay with the
+    /// family, by design. On the owner's own "stop sharing" this finds no tagged books
+    /// in the shared store (their library lives in the private store) and does nothing.
+    func captureLeaveSnapshotIfNeeded() {
+        guard let sharedStore else { return }
+        let ids = contributorIDs
+        let mine = ((try? viewContext.fetch(Book.fetchRequestAll())) ?? [])
+            .filter { $0.objectID.persistentStore === sharedStore }
+            .filter { book in book.contributedBy.map(ids.contains) ?? false }
+        guard !mine.isEmpty else { return }
+
+        pendingLeaveSnapshot = mine.map { book in
+            ContributedBookSnapshot(
+                isbn: book.isbn,
+                title: book.title,
+                author: book.author,
+                yearPublished: book.yearPublished,
+                coverImageURL: book.coverImageURL,
+                coverImageData: book.coverImageData,
+                dateAdded: book.dateAdded,
+                shelfName: book.isLent ? nil : book.shelf?.name,
+                isLent: book.isLent,
+                previousShelfName: book.isLent ? book.previousShelf?.name : nil
+            )
+        }
+    }
+
+    /// User chose to leave their contributed books with the family.
+    func discardLeaveSnapshot() {
+        pendingLeaveSnapshot = nil
+    }
+
+    /// Rebuilds the contributed books in the user's private library from the snapshot
+    /// taken at leave time. Targets the private store EXPLICITLY: the shared store may
+    /// still be mid-purge, so `activeLibrary` can't be trusted to have flipped back.
+    func restoreContributedBooks() {
+        guard let snapshot = pendingLeaveSnapshot else { return }
+        pendingLeaveSnapshot = nil
+        guard let privateStore else { return }
+
+        // Canonical private library, created fresh if the user moved everything out.
+        let library: Library
+        let privateLibraries = ((try? viewContext.fetch(Library.fetchRequestAll())) ?? [])
+            .filter { $0.objectID.persistentStore === privateStore }
+            .sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+        if let first = privateLibraries.first {
+            library = first
+        } else {
+            library = insert("Library") as! Library
+            viewContext.assign(library, to: privateStore)
+            try? viewContext.obtainPermanentIDs(for: [library])
+            library.createdAt = Date()
+        }
+
+        // Find-or-create within the private store, by name (lending shelf by flag).
+        func privateShelf(named name: String, isLending: Bool) -> Shelf {
+            let existing = ((try? viewContext.fetch(Shelf.fetchRequestAll())) ?? [])
+                .filter {
+                    $0.objectID.persistentStore === privateStore
+                        && $0.isLendingShelf == isLending
+                        && (isLending || $0.name == name)
+                }
+                .min { ($0.dateCreated ?? .distantFuture) < ($1.dateCreated ?? .distantFuture) }
+            if let existing {
+                if existing.library == nil { existing.library = library }
+                return existing
+            }
+            return insertShelf(name: name, isLendingShelf: isLending, library: library, store: privateStore)
+        }
+
+        for item in snapshot {
+            let book = insert("Book") as! Book
+            viewContext.assign(book, to: privateStore)
+            try? viewContext.obtainPermanentIDs(for: [book])
+            book.isbn = item.isbn
+            book.title = item.title
+            book.author = item.author
+            book.yearPublished = item.yearPublished
+            book.coverImageURL = item.coverImageURL
+            book.coverImageData = item.coverImageData
+            book.dateAdded = item.dateAdded
+            book.library = library
+            if item.isLent {
+                book.shelf = privateShelf(named: "Lent", isLending: true)
+                if let previousName = item.previousShelfName {
+                    book.previousShelf = privateShelf(named: previousName, isLending: false)
+                }
+            } else if let shelfName = item.shelfName {
+                book.shelf = privateShelf(named: shelfName, isLending: false)
+            }
+        }
+        // On failure the rollback removed everything just built; put the snapshot
+        // back so the prompt reappears and the books aren't silently lost.
+        if !save() {
+            logger.error("Leave-share restore failed to save; re-presenting the prompt")
+            pendingLeaveSnapshot = snapshot
+        }
+        refreshSharedState()
     }
 
     /// Removes empty (no-books) unshared private libraries — leftover scaffolding such

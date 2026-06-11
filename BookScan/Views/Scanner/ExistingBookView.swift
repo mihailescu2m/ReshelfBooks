@@ -38,7 +38,7 @@ struct ExistingBookView: View {
             Group {
                 // If a family member deletes this book while it's on screen, its
                 // relationships fault to rows that no longer exist — don't render them.
-                if book.isDeleted {
+                if book.isGone {
                     Color.clear
                 } else {
                     VStack(spacing: 24) {

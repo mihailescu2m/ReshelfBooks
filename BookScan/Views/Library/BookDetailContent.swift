@@ -39,7 +39,7 @@ struct BookDetailContent: View {
             // If a family member deletes this book while we have it open, the object's
             // relationships fault to rows that no longer exist — rendering them would
             // crash. Render nothing and dismiss instead (see onChange below).
-            if !book.isDeleted {
+            if !book.isGone {
                 VStack(spacing: 24) {
                     bookCoverSection
 
@@ -81,31 +81,41 @@ struct BookDetailContent: View {
 
     private var bookCoverSection: some View {
         VStack(spacing: 12) {
-            ZStack(alignment: .bottomTrailing) {
-                BookCoverImage(imageData: book.coverImageData, title: book.title, size: .large)
-                    .frame(width: 150, height: 225)
-                    .cornerRadius(12)
-                    .shadow(radius: 8)
-
-                Button {
-                    activeSheet = .imagePicker(hasCover: book.coverImageData != nil)
-                } label: {
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(10)
-                        .background(Color.accentColor)
-                        .clipShape(Circle())
-                        .shadow(radius: 4)
+            BookCoverImage(imageData: book.coverImageData, title: book.title, size: .large)
+                .frame(width: 150, height: 225)
+                .cornerRadius(12)
+                .shadow(radius: 8)
+                .overlay(alignment: .topTrailing) {
+                    coverButton(icon: "pencil", accessibilityLabel: "Edit book details") {
+                        activeSheet = .editMetadata
+                    }
+                    .offset(x: 8, y: -8)
                 }
-                .accessibilityLabel("Change cover image")
-                .offset(x: 8, y: 8)
-            }
+                .overlay(alignment: .bottomTrailing) {
+                    coverButton(icon: "camera.fill", accessibilityLabel: "Change cover image") {
+                        activeSheet = .imagePicker(hasCover: book.coverImageData != nil)
+                    }
+                    .offset(x: 8, y: 8)
+                }
 
-            Text("Tap camera to change cover")
+            Text("Tap camera to change cover, pencil to edit details")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
+    }
+
+    /// The circular accent buttons pinned to the cover's corners.
+    private func coverButton(icon: String, accessibilityLabel: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(10)
+                .background(Color.accentColor)
+                .clipShape(Circle())
+                .shadow(radius: 4)
+        }
+        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: - Info Section
@@ -376,6 +386,21 @@ struct BookDetailContent: View {
                 author: book.author,
                 selectedImage: $selectedImage
             )
+
+        case .editMetadata:
+            EditBookDetailsView(
+                isbn: book.isbn,
+                currentTitle: book.title,
+                currentAuthor: book.author,
+                currentYear: book.yearPublished
+            ) { metadata in
+                // The ISBN stays as-is: it must keep matching the physical barcode.
+                guard !book.isGone else { return }
+                book.title = metadata.title
+                book.author = metadata.author
+                book.yearPublished = metadata.yearPublished
+                persistence.save()
+            }
         }
     }
 
@@ -567,6 +592,7 @@ private enum BookDetailSheet: Identifiable {
     case camera
     case photoLibrary
     case webSearch
+    case editMetadata
 
     var id: String {
         switch self {
@@ -577,6 +603,7 @@ private enum BookDetailSheet: Identifiable {
         case .camera:                   return "camera"
         case .photoLibrary:             return "photoLibrary"
         case .webSearch:                return "webSearch"
+        case .editMetadata:             return "editMetadata"
         }
     }
 }

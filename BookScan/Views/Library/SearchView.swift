@@ -10,6 +10,7 @@ import CoreData
 
 struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var persistence: PersistenceController
     @FetchRequest(sortDescriptors: []) private var books: FetchedResults<Book>
     @FetchRequest(sortDescriptors: [
         NSSortDescriptor(key: "sortOrder", ascending: true),
@@ -17,6 +18,11 @@ struct SearchView: View {
         NSSortDescriptor(key: "name", ascending: true)
     ])
     private var shelves: FetchedResults<Shelf>
+
+    // Same active-store scoping as the Library tab: while in a shared library, the
+    // user's parked private books must not surface through search either.
+    private var visibleShelves: [Shelf] { persistence.visibleOnly(shelves) }
+    private var visibleBooks: [Book] { persistence.visibleOnly(books) }
 
     @State private var searchText = ""
     @State private var debouncedSearchText = ""
@@ -130,7 +136,7 @@ struct SearchView: View {
         let query = debouncedSearchText.lowercased().trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return [] }
 
-        return books.filter { book in
+        return visibleBooks.filter { book in
             book.title.lowercased().contains(query) ||
             book.author.lowercased().contains(query) ||
             book.isbn.lowercased().contains(query)
@@ -198,7 +204,7 @@ struct SearchView: View {
                 LazyVStack(spacing: 12) {
                     ForEach(filteredBooks) { book in
                         NavigationLink {
-                            SearchBookDetailView(book: book, shelves: Array(shelves))
+                            SearchBookDetailView(book: book, shelves: visibleShelves)
                         } label: {
                             SearchResultRow(book: book)
                         }

@@ -79,6 +79,10 @@ enum SharingPresenter {
             // Sharing was stopped by the user — mark as saved so the dismiss path
             // doesn't try to delete an already-removed share.
             shareSaved = true
+            // If a PARTICIPANT just left, snapshot the books they contributed BEFORE
+            // the zone purge deletes the local copies, so they can take them back.
+            // (No-op for an owner stopping their own share.)
+            persistence.captureLeaveSnapshotIfNeeded()
             persistence.refreshSharedState()
         }
 

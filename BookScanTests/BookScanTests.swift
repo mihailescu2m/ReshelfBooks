@@ -347,6 +347,79 @@ struct ISBNValidationTests {
         #expect(ISBNValidator.normalize("978-0-14 143951-8") == "9780141439518")
         #expect(ISBNValidator.normalize("080442957x") == "080442957X")
     }
+
+    @Test("canonicalize converts ISBN-10 to ISBN-13")
+    func canonicalizeConvertsISBN10() {
+        #expect(ISBNValidator.canonicalize("0141439513") == "9780141439518")
+        // X check digit: dropped and recomputed for the 978 form.
+        #expect(ISBNValidator.canonicalize("080442957X") == "9780804429573")
+        #expect(ISBNValidator.canonicalize("0-14-143951-3") == "9780141439518")
+    }
+
+    @Test("canonicalize leaves ISBN-13 and invalid input unchanged (just normalized)")
+    func canonicalizePassthrough() {
+        #expect(ISBNValidator.canonicalize("978-0-14-143951-8") == "9780141439518")
+        #expect(ISBNValidator.canonicalize("12345") == "12345")
+        // Invalid ISBN-10 (bad checksum) is not converted.
+        #expect(ISBNValidator.canonicalize("0141439512") == "0141439512")
+    }
+}
+
+// MARK: - Leave-Share Restore Tests
+
+@Suite("Leave Share Restore Tests")
+struct LeaveRestoreTests {
+
+    @Test("restoreContributedBooks rebuilds books, shelves and lending state")
+    func restoreRebuildsLibrary() {
+        let persistence = PersistenceController(inMemory: true)
+        persistence.pendingLeaveSnapshot = [
+            ContributedBookSnapshot(
+                isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen",
+                yearPublished: "1813", coverImageURL: nil, coverImageData: nil,
+                dateAdded: Date(timeIntervalSince1970: 1_000),
+                shelfName: "Fiction", isLent: false, previousShelfName: nil
+            ),
+            ContributedBookSnapshot(
+                isbn: "9780804429573", title: "Borrowed Tome", author: "A. Lender",
+                yearPublished: "2000", coverImageURL: nil, coverImageData: nil,
+                dateAdded: Date(timeIntervalSince1970: 2_000),
+                shelfName: nil, isLent: true, previousShelfName: "Fiction"
+            ),
+            ContributedBookSnapshot(
+                isbn: "9780000000002", title: "Loose Leaf", author: "N. Shelf",
+                yearPublished: "2010", coverImageURL: nil, coverImageData: nil,
+                dateAdded: nil, shelfName: nil, isLent: false, previousShelfName: nil
+            )
+        ]
+
+        persistence.restoreContributedBooks()
+
+        let books = (try? persistence.viewContext.fetch(Book.fetchRequestAll())) ?? []
+        #expect(books.count == 3)
+        #expect(persistence.pendingLeaveSnapshot == nil)
+
+        let shelved = books.first { $0.isbn == "9780141439518" }
+        #expect(shelved?.shelf?.name == "Fiction")
+        #expect(shelved?.isLent == false)
+
+        let lent = books.first { $0.isbn == "9780804429573" }
+        #expect(lent?.isLent == true)
+        #expect(lent?.previousShelf?.name == "Fiction")
+        // The shelf is matched by name, not duplicated.
+        #expect(lent?.previousShelf === shelved?.shelf)
+
+        let unshelved = books.first { $0.isbn == "9780000000002" }
+        #expect(unshelved?.shelf == nil)
+    }
+
+    @Test("restoreContributedBooks is a no-op without a snapshot")
+    func restoreWithoutSnapshotDoesNothing() {
+        let persistence = PersistenceController(inMemory: true)
+        persistence.restoreContributedBooks()
+        let books = (try? persistence.viewContext.fetch(Book.fetchRequestAll())) ?? []
+        #expect(books.isEmpty)
+    }
 }
 
 // MARK: - Cover Image Tests
@@ -394,6 +467,69 @@ struct CoverImageTests {
         let decoded = UIImage(data: CoverImage.normalizedData(from: raw)!)!
         #expect(decoded.size.width == 300)
         #expect(decoded.size.height == 450)
+    }
+}
+
+// MARK: - Edition Description Dedup Tests
+
+@Suite("Edition Description Dedup Tests")
+struct EditionDescriptionDedupTests {
+
+    private func metadata(title: String, author: String, year: String) -> BookMetadata {
+        BookMetadata(isbn: "9780141439518", title: title, author: author, yearPublished: year, coverImageURL: nil)
+    }
+
+    @Test("Identical results from two sources collapse into one description")
+    func identicalResultsCollapse() {
+        let results = [
+            (source: "Open Library", metadata: metadata(title: "Pride and Prejudice", author: "Jane Austen", year: "1813")),
+            (source: "Google Books", metadata: metadata(title: "Pride and Prejudice", author: "Jane Austen", year: "1813"))
+        ]
+        let deduped = ISBNLookupService.dedupedDescriptions(results)
+        #expect(deduped.count == 1)
+        #expect(deduped.first?.sources == ["Open Library", "Google Books"])
+    }
+
+    @Test("Dedup compares case- and whitespace-insensitively, keeping the first metadata")
+    func dedupNormalizes() {
+        let results = [
+            (source: "Open Library", metadata: metadata(title: "Pride and Prejudice ", author: "JANE AUSTEN", year: "1813")),
+            (source: "Crossref", metadata: metadata(title: "pride and prejudice", author: "Jane Austen", year: "1813"))
+        ]
+        let deduped = ISBNLookupService.dedupedDescriptions(results)
+        #expect(deduped.count == 1)
+        // The first (highest-priority) source supplies the canonical metadata.
+        #expect(deduped.first?.metadata.author == "JANE AUSTEN")
+        #expect(deduped.first?.sources == ["Open Library", "Crossref"])
+    }
+
+    @Test("Different years stay separate, in priority order")
+    func differentYearsSeparate() {
+        let results = [
+            (source: "Open Library", metadata: metadata(title: "Pride and Prejudice", author: "Jane Austen", year: "1813")),
+            (source: "Google Books", metadata: metadata(title: "Pride and Prejudice", author: "Jane Austen", year: "2003"))
+        ]
+        let deduped = ISBNLookupService.dedupedDescriptions(results)
+        #expect(deduped.count == 2)
+        #expect(deduped[0].metadata.yearPublished == "1813")
+        #expect(deduped[1].metadata.yearPublished == "2003")
+    }
+
+    @Test("The same source name isn't listed twice on one description")
+    func duplicateSourceNotRepeated() {
+        // Both Open Library endpoints report under the same public name.
+        let results = [
+            (source: "Open Library", metadata: metadata(title: "Pride and Prejudice", author: "Jane Austen", year: "1813")),
+            (source: "Open Library", metadata: metadata(title: "Pride and Prejudice", author: "Jane Austen", year: "1813"))
+        ]
+        let deduped = ISBNLookupService.dedupedDescriptions(results)
+        #expect(deduped.count == 1)
+        #expect(deduped.first?.sources == ["Open Library"])
+    }
+
+    @Test("Empty input produces no descriptions")
+    func emptyInput() {
+        #expect(ISBNLookupService.dedupedDescriptions([]).isEmpty)
     }
 }
 
