@@ -6,31 +6,36 @@
 //
 
 import SwiftUI
-import os.log
-
-private let logger = Logger(subsystem: "com.bookscan", category: "NewBook")
 
 struct NewBookView: View {
     @Environment(\.dismiss) private var dismiss
 
     let metadata: BookMetadata
     let shelves: [Shelf]
-    /// Receives the chosen shelf and the already-loaded cover image (if the
-    /// preview finished downloading), so the cover isn't fetched a second time.
-    let onSave: (Shelf?, UIImage?) -> Void
+    /// The cover search running since scan time (owned by ScannerTabView). The
+    /// preview fills in whenever it finds an image — this sheet never waits for it,
+    /// and the search continues in the background after the book is saved.
+    @ObservedObject var coverPipeline: CoverPipeline
+    /// Receives the chosen shelf; the cover is attached by the pipeline.
+    let onSave: (Shelf?) -> Void
     let onManualEntry: (() -> Void)?
 
-    init(metadata: BookMetadata, shelves: [Shelf], onSave: @escaping (Shelf?, UIImage?) -> Void, onManualEntry: (() -> Void)? = nil) {
+    init(
+        metadata: BookMetadata,
+        shelves: [Shelf],
+        coverPipeline: CoverPipeline,
+        onSave: @escaping (Shelf?) -> Void,
+        onManualEntry: (() -> Void)? = nil
+    ) {
         self.metadata = metadata
         self.shelves = shelves
+        self.coverPipeline = coverPipeline
         self.onSave = onSave
         self.onManualEntry = onManualEntry
     }
 
     @State private var selectedShelf: Shelf?
     @State private var showingNewShelfAlert = false
-    @State private var coverImage: UIImage?
-    @State private var isLoadingImage = false
 
     var body: some View {
         // No NavigationStack — presented as a sheet from ScannerTabView's NavigationStack;
@@ -61,9 +66,6 @@ struct NewBookView: View {
             }
             .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
                 selectedShelf = newShelf
-            }
-            .task {
-                await loadCoverImage()
             }
         }
     }
@@ -124,17 +126,17 @@ struct NewBookView: View {
 
     @ViewBuilder
     private var coverImageView: some View {
-        if isLoadingImage {
+        if let image = coverPipeline.image {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .clipped()
+        } else if coverPipeline.isSearching {
             Rectangle()
                 .fill(Color.gray.opacity(0.3))
                 .overlay {
                     ProgressView()
                 }
-        } else if let image = coverImage {
-            Image(uiImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .clipped()
         } else {
             BookCoverImage(imageData: nil, title: metadata.title, size: .medium)
         }
@@ -202,7 +204,7 @@ struct NewBookView: View {
 
     private var saveButton: some View {
         Button {
-            onSave(selectedShelf, coverImage)
+            onSave(selectedShelf)
             dismiss()
         } label: {
             Text("Add to Library")
@@ -212,23 +214,6 @@ struct NewBookView: View {
                 .background(Color.accentColor)
                 .foregroundColor(.white)
                 .cornerRadius(12)
-        }
-    }
-
-    @MainActor
-    private func loadCoverImage() async {
-        guard let urlString = metadata.coverImageURL else { return }
-
-        isLoadingImage = true
-        defer { isLoadingImage = false }
-
-        do {
-            let data = try await ISBNLookupService.shared.downloadCoverImage(from: urlString)
-            if let image = UIImage(data: data) {
-                coverImage = image
-            }
-        } catch {
-            logger.warning("Failed to load cover image for ISBN \(metadata.isbn): \(error.localizedDescription)")
         }
     }
 }
@@ -242,7 +227,7 @@ struct NewBookView: View {
         coverImageURL: nil
     )
 
-    return NewBookView(metadata: metadata, shelves: []) { _, _ in }
+    return NewBookView(metadata: metadata, shelves: [], coverPipeline: .finished()) { _ in }
         .environment(\.managedObjectContext, PersistenceController.preview.viewContext)
         .environmentObject(PersistenceController.preview)
 }

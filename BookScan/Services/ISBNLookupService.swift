@@ -77,21 +77,23 @@ actor ISBNLookupService {
 
     // MARK: - Public API
 
-    /// Main lookup function. Tries five sources, each covering a different sweet spot:
-    /// - Open Library (catalog API): classics, public-domain, library-catalogued, older titles
-    /// - Google Books: modern popular / English-language titles
-    /// - Open Library (search index): contemporary popular fiction & non-fiction — backed by
-    ///   a different (Solr) index than the catalog API, so it often has records the catalog
-    ///   call misses
-    /// - Crossref: academic, scientific, textbooks, university press (Springer, OUP, etc.)
-    /// - Library of Congress: niche US-published books, regional publishers, children's
-    ///   books, cookbooks, official publications — anything with a US legal deposit record
+    /// Main lookup function: two tiers of sources, each raced in parallel with
+    /// first-hit-wins semantics (losers are cancelled).
     ///
-    /// The two primary sources are tried sequentially so the common case stays cheap
-    /// (one or two round-trips, stopping at the first hit). If both miss, the three
-    /// fallbacks are fanned out **concurrently** — so a hard-to-find book doesn't pay
-    /// three sequential round-trips — while still honouring priority order: we await the
-    /// results highest-priority-first and return the first hit.
+    /// - Tier 1 — Open Library (catalog API) and Google Books: the highest-quality,
+    ///   highest-hit-rate sources. Racing them caps the common case at
+    ///   min(OL, Google) latency, and one hanging primary can no longer stall the
+    ///   scan while the other already has the answer.
+    /// - Tier 2 — started only when ALL of tier 1 missed: Open Library's search
+    ///   index, Crossref (academic), Library of Congress (US legal deposit), Trove
+    ///   (Australian; needs the API key from iOS Settings, silently skipped without
+    ///   one), and Inventaire (multilingual European editions, incl. Romanian).
+    ///   First-found-wins is fine at this tier: all five are "better than nothing",
+    ///   and the Edit Book picker cleans up any rough result.
+    ///
+    /// Covers are deliberately NOT resolved here — metadata returns the moment a
+    /// source answers, and the scan cover pipeline searches for artwork in parallel
+    /// (continuing in the background after the book is saved).
     func lookupBook(isbn: String) async throws -> BookMetadata {
         let cleanISBN = ISBNValidator.normalize(isbn)
 
@@ -102,44 +104,58 @@ actor ISBNLookupService {
             if Self.isConnectivityError(error) { connectivityError = error }
         }
 
-        // Primary 1: Open Library catalog API.
-        do {
-            let result = try await lookupFromOpenLibrary(isbn: cleanISBN)
-            return await ensureCoverImage(for: result)
-        } catch { noteFailure(error) }
+        // Tier 1.
+        if let metadata = await firstHit(isbn: cleanISBN, noteFailure: noteFailure, lookups: [
+            { try await self.lookupFromOpenLibrary(isbn: $0) },
+            { try await self.lookupFromGoogleBooks(isbn: $0) }
+        ]) {
+            return metadata
+        }
 
-        // Primary 2: Google Books.
-        do {
-            let result = try await lookupFromGoogleBooks(isbn: cleanISBN)
-            return await ensureCoverImage(for: result)
-        } catch { noteFailure(error) }
-
-        // Both primaries missed — fan the three fallbacks out concurrently. The actor
-        // suspends at each URLSession await, so the three requests genuinely overlap.
-        // (Any child task we don't read is cancelled automatically when this scope exits.)
-        async let openLibrarySearch = lookupFromOpenLibrarySearch(isbn: cleanISBN)
-        async let crossref          = lookupFromCrossref(isbn: cleanISBN)
-        async let libraryOfCongress = lookupFromLibraryOfCongress(isbn: cleanISBN)
-
-        // Await in priority order and return the first hit (stop-at-first-hit semantics,
-        // just with the network work already running in parallel).
-        do {
-            let result = try await openLibrarySearch
-            return await ensureCoverImage(for: result)
-        } catch { noteFailure(error) }
-        do {
-            let result = try await crossref
-            return await ensureCoverImage(for: result)
-        } catch { noteFailure(error) }
-        do {
-            let result = try await libraryOfCongress
-            return await ensureCoverImage(for: result)
-        } catch { noteFailure(error) }
+        // Tier 2.
+        if let metadata = await firstHit(isbn: cleanISBN, noteFailure: noteFailure, lookups: [
+            { try await self.lookupFromOpenLibrarySearch(isbn: $0) },
+            { try await self.lookupFromCrossref(isbn: $0) },
+            { try await self.lookupFromLibraryOfCongress(isbn: $0) },
+            { try await self.lookupFromTrove(isbn: $0) },
+            { try await self.lookupFromInventaire(isbn: $0) }
+        ]) {
+            return metadata
+        }
 
         if let connectivityError {
             throw ISBNLookupError.networkError(connectivityError)
         }
         throw ISBNLookupError.notFound
+    }
+
+    /// Races the given lookups; the first SUCCESS wins and the rest are cancelled.
+    /// Failures are reported through `noteFailure` as they arrive (after a win the
+    /// group returns immediately, so losers' cancellation errors are never consumed),
+    /// letting the caller distinguish "offline" from a genuine miss.
+    private func firstHit(
+        isbn: String,
+        noteFailure: (Error) -> Void,
+        lookups: [(String) async throws -> BookMetadata]
+    ) async -> BookMetadata? {
+        await withTaskGroup(of: Result<BookMetadata, Error>.self) { group in
+            for lookup in lookups {
+                group.addTask {
+                    do { return .success(try await lookup(isbn)) }
+                    catch { return .failure(error) }
+                }
+            }
+            for await result in group {
+                switch result {
+                case .success(let metadata):
+                    group.cancelAll()
+                    return metadata
+                case .failure(let error):
+                    noteFailure(error)
+                }
+            }
+            return nil
+        }
     }
 
     /// Queries ALL metadata sources for this ISBN concurrently and returns every
@@ -151,13 +167,15 @@ actor ISBNLookupService {
     func lookupAllDescriptions(isbn: String) async -> [EditionDescription] {
         let cleanISBN = ISBNValidator.normalize(isbn)
 
-        // All five sources fan out concurrently (the actor suspends at each URLSession
+        // All sources fan out concurrently (the actor suspends at each URLSession
         // await, so the requests overlap); a failed source simply contributes nothing.
         async let openLibrary       = lookupFromOpenLibrary(isbn: cleanISBN)
         async let googleBooks       = lookupFromGoogleBooks(isbn: cleanISBN)
         async let openLibrarySearch = lookupFromOpenLibrarySearch(isbn: cleanISBN)
         async let crossref          = lookupFromCrossref(isbn: cleanISBN)
         async let libraryOfCongress = lookupFromLibraryOfCongress(isbn: cleanISBN)
+        async let trove             = lookupFromTrove(isbn: cleanISBN)
+        async let inventaire        = lookupFromInventaire(isbn: cleanISBN)
 
         // Both Open Library endpoints carry the same public name; dedup merges them.
         let results: [(source: String, metadata: BookMetadata?)] = [
@@ -165,7 +183,9 @@ actor ISBNLookupService {
             ("Google Books", try? await googleBooks),
             ("Open Library", try? await openLibrarySearch),
             ("Crossref", try? await crossref),
-            ("Library of Congress", try? await libraryOfCongress)
+            ("Library of Congress", try? await libraryOfCongress),
+            ("Trove", try? await trove),
+            ("Inventaire", try? await inventaire)
         ]
         let found = results.compactMap { result in
             result.metadata.map { (source: result.source, metadata: $0) }
@@ -291,54 +311,42 @@ actor ISBNLookupService {
 
     // MARK: - Cover Image Helpers
 
-    /// Ensures the book metadata has a cover image, searching if needed
-    private func ensureCoverImage(for metadata: BookMetadata) async -> BookMetadata {
-        if metadata.coverImageURL != nil {
-            return metadata
-        }
-
-        // Try to find a cover image
-        if let coverURL = await findFirstCoverImage(isbn: metadata.isbn, title: metadata.title, author: metadata.author) {
-            return BookMetadata(
-                isbn: metadata.isbn,
-                title: metadata.title,
-                author: metadata.author,
-                yearPublished: metadata.yearPublished,
-                coverImageURL: coverURL
-            )
-        }
-
-        return metadata
+    /// Phase 1 of the scan cover pipeline: races all the ISBN-keyed cover sources in
+    /// parallel and returns the first valid URL (losers are cancelled). Needs nothing
+    /// but the barcode, so the pipeline starts this while the metadata race runs.
+    func findCoverURLByISBN(isbn: String) async -> String? {
+        await firstNonNil([
+            { await self.getOpenLibraryCoverURL(isbn: $0) },
+            { await self.searchGoogleBooks(query: "isbn:\($0)", maxResults: 1).first },
+            { await self.getWorldCatCoverURL(isbn: $0) },
+            { await self.getBookcoverAPIURL(isbn: $0) },
+            { await self.getBetterWorldBooksURL(isbn: $0) }
+        ], input: isbn)
     }
 
-    /// Finds the first valid cover image from multiple sources
-    private func findFirstCoverImage(isbn: String, title: String, author: String) async -> String? {
-        // Try Open Library Covers API by ISBN
-        if let coverURL = await getOpenLibraryCoverURL(isbn: isbn) {
-            return coverURL
+    /// Phase 2 of the scan cover pipeline: title/author-based fallback, used only
+    /// when neither the metadata source nor any ISBN-keyed source had a cover.
+    func findCoverURL(title: String, author: String) async -> String? {
+        if let url = await searchGoogleBooks(query: "\(title) \(author)", maxResults: 1).first {
+            return url
         }
+        return await searchOpenLibrary(title: title, author: author, maxResults: 1).first
+    }
 
-        // Try Google Books by title + author
-        if let coverURL = await searchGoogleBooks(query: "\(title) \(author)", maxResults: 1).first {
-            return coverURL
+    /// Races async operations on `input`; first non-nil result wins, rest cancelled.
+    private func firstNonNil(_ operations: [(String) async -> String?], input: String) async -> String? {
+        await withTaskGroup(of: String?.self) { group in
+            for operation in operations {
+                group.addTask { await operation(input) }
+            }
+            for await result in group {
+                if let result {
+                    group.cancelAll()
+                    return result
+                }
+            }
+            return nil
         }
-
-        // Try WorldCat (OCLC) by ISBN — good coverage for academic & non-English books
-        if let coverURL = await getWorldCatCoverURL(isbn: isbn) {
-            return coverURL
-        }
-
-        // Try Bookcover API by ISBN
-        if let coverURL = await getBookcoverAPIURL(isbn: isbn) {
-            return coverURL
-        }
-
-        // Try Better World Books by ISBN
-        if let coverURL = await getBetterWorldBooksURL(isbn: isbn) {
-            return coverURL
-        }
-
-        return nil
     }
 
     /// Gets cover URL from Open Library Covers API if valid
@@ -718,6 +726,145 @@ actor ISBNLookupService {
         }
 
         return nil
+    }
+
+    // MARK: - Trove (National Library of Australia)
+
+    /// User-supplied Trove API key, pasted into the app's iOS Settings page.
+    /// nil (or empty/whitespace) disables the Trove source entirely.
+    private var troveAPIKey: String? {
+        let key = UserDefaults.standard.string(forKey: "trove_api_key")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (key?.isEmpty ?? true) ? nil : key
+    }
+
+    /// Looks up book metadata from Trove (National Library of Australia).
+    ///
+    /// Trove aggregates the NLA catalogue plus the holdings of libraries across
+    /// Australia — by far the deepest source for Australian-published books. It
+    /// requires a free API key (request at trove.nla.gov.au; keys expire after 12
+    /// months) entered in the iOS Settings page; without one this source simply
+    /// reports "not found" and the cascade moves on. An invalid/expired key fails
+    /// the same way (non-200 → invalidResponse), so lookups degrade gracefully.
+    ///
+    /// Trove work records only carry small thumbnails, so no cover URL is returned —
+    /// the cover pipeline finds a full-size image from the dedicated cover sources.
+    private func lookupFromTrove(isbn: String) async throws -> BookMetadata {
+        guard let key = troveAPIKey else { throw ISBNLookupError.notFound }
+
+        let json = try await fetchJSON(
+            "https://api.trove.nla.gov.au/v3/result?category=book&q=isbn:\(isbn)&encoding=json&n=1",
+            headers: ["X-API-KEY": key]
+        )
+
+        guard let categories = json["category"] as? [[String: Any]],
+              let records = categories.first?["records"] as? [String: Any],
+              let works = records["work"] as? [[String: Any]],
+              let work = works.first,
+              let title = work["title"] as? String, !title.isEmpty else {
+            throw ISBNLookupError.notFound
+        }
+
+        // Contributors use the same "Last, First, dates" authority form as LOC.
+        let author: String
+        if let contributors = work["contributor"] as? [String], let raw = contributors.first {
+            author = reformatLOCContributor(raw)
+        } else {
+            author = "Unknown Author"
+        }
+
+        // "issued" may be a year (Int) or a range string like "2008-2014".
+        let yearPublished: String
+        if let year = work["issued"] as? Int {
+            yearPublished = String(year)
+        } else {
+            yearPublished = extractYear(from: work["issued"] as? String)
+        }
+
+        return BookMetadata(
+            isbn: isbn,
+            title: title,
+            author: author,
+            yearPublished: yearPublished,
+            coverImageURL: nil   // thumbnails only; covers come from the cover sources
+        )
+    }
+
+    // MARK: - Inventaire
+
+    /// Looks up book metadata from Inventaire (inventaire.io).
+    ///
+    /// Inventaire is a Wikidata-federated open bibliographic database (CC0) with
+    /// broad multilingual coverage — notably European editions (including Romanian)
+    /// that the big English-centric sources miss. No API key required.
+    ///
+    /// The data model is Wikidata-style: the ISBN resolves to an *edition* entity;
+    /// the edition links its *work* (P629); the work links its *author* (P50), whose
+    /// label is fetched last — so a full lookup is up to three small requests.
+    private func lookupFromInventaire(isbn: String) async throws -> BookMetadata {
+        let edition = try await inventaireEntity(uri: "isbn:\(isbn)")
+
+        guard let title = inventaireClaim(edition, "wdt:P1476") ?? inventaireLabel(edition),
+              !title.isEmpty else {
+            throw ISBNLookupError.notFound
+        }
+
+        // Author (via the work) and the work's publication year as a fallback.
+        var author = "Unknown Author"
+        var workYear: String?
+        if let workURI = inventaireClaim(edition, "wdt:P629"),
+           let work = try? await inventaireEntity(uri: workURI) {
+            workYear = inventaireClaim(work, "wdt:P577")
+            if let authorURI = inventaireClaim(work, "wdt:P50"),
+               let authorEntity = try? await inventaireEntity(uri: authorURI),
+               let name = inventaireLabel(authorEntity) {
+                author = name
+            }
+        }
+
+        // Prefer the edition's own publication date over the work's first-published.
+        let yearPublished = extractYear(from: inventaireClaim(edition, "wdt:P577") ?? workYear)
+
+        // Editions often carry a community-uploaded cover image.
+        var coverImageURL: String?
+        if let image = edition["image"] as? [String: Any],
+           let path = image["url"] as? String {
+            coverImageURL = "https://inventaire.io\(path)"
+        }
+
+        return BookMetadata(
+            isbn: isbn,
+            title: title,
+            author: author,
+            yearPublished: yearPublished,
+            coverImageURL: coverImageURL
+        )
+    }
+
+    /// Fetches a single Inventaire entity (edition, work, or author) by URI.
+    /// The response keys entities by their canonical URI, which may differ from the
+    /// requested one (isbn: URIs redirect to wd:/inv: IDs), so take the first value.
+    private func inventaireEntity(uri: String) async throws -> [String: Any] {
+        let json = try await fetchJSON("https://inventaire.io/api/entities/by-uris?uris=\(uri)")
+        guard let entities = json["entities"] as? [String: Any],
+              let entity = entities.values.first as? [String: Any] else {
+            throw ISBNLookupError.notFound
+        }
+        return entity
+    }
+
+    /// First value of a claim (e.g. "wdt:P1476") on an Inventaire entity, if any.
+    private func inventaireClaim(_ entity: [String: Any], _ property: String) -> String? {
+        guard let claims = entity["claims"] as? [String: Any],
+              let values = claims[property] as? [Any],
+              let first = values.first else { return nil }
+        return "\(first)"
+    }
+
+    /// The entity's English label, falling back to any available language.
+    private func inventaireLabel(_ entity: [String: Any]) -> String? {
+        guard let labels = entity["labels"] as? [String: Any] else { return nil }
+        return (labels["en"] ?? labels.values.first) as? String
     }
 
     // MARK: - Helpers

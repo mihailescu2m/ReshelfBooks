@@ -51,7 +51,8 @@ If BookScan saves you time or you just find it useful, a small donation is great
 ### Scanning & Lookup
 - **Instant barcode scanning** — point the camera at an EAN-13 / ISBN-13 barcode and the book is identified in under a second
 - **Manual ISBN entry** — type any ISBN-10 or ISBN-13 (with full check-digit validation) when a barcode is too worn to scan
-- **Five-source lookup engine** — Open Library and Google Books are tried first; if both miss, three more sources (Open Library's search index, Crossref, and the Library of Congress) are queried in parallel and the highest-priority match wins. Each covers a different sweet spot (classics & library-catalogued, popular modern, contemporary popular fiction & non-fiction, academic & textbooks, niche US-published & children's) so almost every book is found
+- **Seven-source lookup engine** — two tiers, each raced in parallel with first-hit-wins: Open Library and Google Books first; if both miss, five more sources (Open Library's search index, Crossref, the Library of Congress, Trove, and Inventaire) race next. Each covers a different sweet spot (classics & library-catalogued, popular modern, contemporary popular fiction & non-fiction, academic & textbooks, niche US-published & children's, Australian-published, multilingual European editions) so almost every book is found — fast
+- **Background cover search** — cover art is hunted in parallel with the metadata lookup (never delaying the New Book sheet) and keeps searching in the background after the book is saved, attaching the cover while the next book is already being scanned
 - **Rich cover art** — searches eight sources concurrently (Open Library, Google Books ×3, WorldCat, Bookcover API, Better World Books, and Open Library search) and picks the best available image
 
 ### Library Management
@@ -197,7 +198,7 @@ A single hidden `Library` root owns every shelf and book; sharing that one objec
 
 ## API Credits
 
-BookScan uses the following free, open APIs — no API keys required:
+BookScan uses the following free, open APIs — no API keys required (except Trove, optional):
 
 | Service | Used for |
 |---|---|
@@ -205,6 +206,8 @@ BookScan uses the following free, open APIs — no API keys required:
 | [Google Books API](https://developers.google.com/books) | Book metadata (2nd) + cover images (queried three ways: by ISBN, title+author, title) |
 | [Crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) | Book metadata (4th) — academic, scientific, and university press titles |
 | [Library of Congress](https://www.loc.gov/apis/) | Book metadata (5th) — niche US-published, regional, children's, cookbooks, official publications |
+| [Trove (National Library of Australia)](https://trove.nla.gov.au/about/create-something/using-api) | Book metadata (6th) — Australian-published books. Needs a free API key (renewed yearly), pasted into iOS Settings → BookScan |
+| [Inventaire](https://api.inventaire.io/) | Book metadata (7th) + cover images — Wikidata-federated community database; multilingual European editions (incl. Romanian) |
 | [WorldCat / OCLC](https://www.worldcat.org) | Cover images by ISBN — excellent coverage of academic, older, and non-English titles |
 | [Bookcover API](https://bookcover.longitood.com) | Cover images by ISBN |
 | [Better World Books](https://www.betterworldbooks.com) | Cover images by ISBN |

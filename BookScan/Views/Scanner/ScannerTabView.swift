@@ -7,9 +7,6 @@
 
 import SwiftUI
 import CoreData
-import os.log
-
-private let logger = Logger(subsystem: "com.bookscan", category: "Scanner")
 
 /// All sheets the scanner can present. A single enum drives one `.sheet(item:)`,
 /// so SwiftUI never has two competing presentation state machines on the same view —
@@ -61,6 +58,10 @@ struct ScannerTabView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var lookupTask: Task<Void, Never>?
+    /// Cover search for the book currently being looked up / previewed. Started at
+    /// lookup time, handed off to the saved Book on Add (where it finishes in the
+    /// background), cancelled on Cancel/reset. One pipeline per scanned new book.
+    @State private var coverPipeline: CoverPipeline?
 
     var body: some View {
         // No NavigationStack — this view is a page inside ContentView's page-style
@@ -144,11 +145,17 @@ struct ScannerTabView: View {
                 transitionToManualEntry()
             })
         case .newBook(let metadata):
-            NewBookView(metadata: metadata, shelves: persistence.visibleOnly(shelves), onSave: { shelf, coverImage in
-                saveNewBook(metadata: metadata, shelf: shelf, coverImage: coverImage)
-            }, onManualEntry: {
-                transitionToManualEntry()
-            })
+            NewBookView(
+                metadata: metadata,
+                shelves: persistence.visibleOnly(shelves),
+                coverPipeline: coverPipeline ?? .finished(),
+                onSave: { shelf in
+                    saveNewBook(metadata: metadata, shelf: shelf)
+                },
+                onManualEntry: {
+                    transitionToManualEntry()
+                }
+            )
         case .manualEntry(let isbn):
             // Use .sheet (not .fullScreenCover) so this doesn't share the parent
             // navigation context — fullScreenCover on iPad causes a crash. On iPhone
@@ -282,6 +289,13 @@ struct ScannerTabView: View {
         isLoading = true
         errorMessage = nil
 
+        // Start the cover search NOW: its ISBN-keyed phase needs nothing but the
+        // barcode, so it races in parallel with the metadata lookup below.
+        coverPipeline?.cancel()
+        let pipeline = CoverPipeline()
+        coverPipeline = pipeline
+        pipeline.start(isbn: isbn)
+
         lookupTask?.cancel()
         lookupTask = Task {
             do {
@@ -290,13 +304,16 @@ struct ScannerTabView: View {
                     // Re-check cancellation *inside* the hop: a reset that lands
                     // between the await and this assignment must not resurrect a
                     // stale result.
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled else { pipeline.cancel(); return }
+                    pipeline.metadataArrived(metadata)
                     isLoading = false
                     activeSheet = .newBook(metadata)
                 }
             } catch {
                 await MainActor.run {
-                    guard !Task.isCancelled else { return }
+                    guard !Task.isCancelled else { pipeline.cancel(); return }
+                    // No metadata means no sheet and no book — stop the cover work.
+                    pipeline.cancel()
                     isLoading = false
                     errorMessage = error.localizedDescription
                     scannedCode = nil
@@ -306,7 +323,7 @@ struct ScannerTabView: View {
         }
     }
 
-    private func saveNewBook(metadata: BookMetadata, shelf: Shelf?, coverImage: UIImage?) {
+    private func saveNewBook(metadata: BookMetadata, shelf: Shelf?) {
         // Factory attaches the book to the active library and assigns it to the
         // correct CloudKit store (private for the owner, shared for a participant).
         let book = persistence.makeBook(
@@ -317,44 +334,27 @@ struct ScannerTabView: View {
             coverImageURL: metadata.coverImageURL,
             shelf: shelf
         )
+        persistence.save()
 
-        if let coverImage {
-            // Reuse the image already downloaded for the preview — no second fetch.
-            book.coverImageData = coverImage.coverJPEGData()
-            persistence.save()
-        } else if let coverURL = metadata.coverImageURL {
-            // Persist the book now; fetch the cover asynchronously.
-            persistence.save()
-            Task {
-                do {
-                    let rawData = try await ISBNLookupService.shared.downloadCoverImage(from: coverURL)
-                    guard let imageData = CoverImage.normalizedData(from: rawData) else {
-                        logger.warning("Downloaded cover for ISBN \(metadata.isbn) was not a valid image; skipping")
-                        return
-                    }
-                    await MainActor.run {
-                        // The book may be gone by now: deleted by the user (or a family
-                        // member, merged in with a nil context), or rolled back by a
-                        // failed save — writing to it then would crash or be lost.
-                        guard !book.isGone else { return }
-                        book.coverImageData = imageData
-                        persistence.save()
-                    }
-                    logger.info("Successfully downloaded cover image for ISBN \(metadata.isbn)")
-                } catch {
-                    // Log the error but don't fail - book is still saved, just without cover
-                    logger.warning("Failed to download cover image for ISBN \(metadata.isbn): \(error.localizedDescription)")
-                }
-            }
-        } else {
-            persistence.save()
-        }
+        // Hand the cover search to the saved book: an already-found image is written
+        // immediately; otherwise the pipeline keeps running in the background and
+        // attaches the cover when found — while the user scans the next book.
+        // (The reference is kept until resetScanner so the still-dismissing sheet
+        // doesn't re-render against a missing pipeline; attaching marks it immune
+        // to the reset's cancel.)
+        coverPipeline?.attach(to: book, persistence: persistence)
         // NewBookView dismisses itself, which runs resetScanner via handleSheetDismiss.
     }
 
     private func resetScanner() {
         lookupTask?.cancel()
         lookupTask = nil
+        // A pipeline that was never handed to a saved book is abandoned — stop it.
+        // An attached one keeps running in the background for its book.
+        if coverPipeline?.isAttached != true {
+            coverPipeline?.cancel()
+        }
+        coverPipeline = nil
         scannedCode = nil
         activeSheet = nil
         pendingAction = nil
