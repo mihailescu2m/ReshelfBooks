@@ -53,7 +53,7 @@ If BookScan saves you time or you just find it useful, a small donation is great
 - **Manual ISBN entry** — type any ISBN-10 or ISBN-13 (with full check-digit validation) when a barcode is too worn to scan
 - **Seven-source lookup engine** — two tiers, each raced in parallel with first-hit-wins: Open Library and Google Books first; if both miss, five more sources (Open Library's search index, Crossref, the Library of Congress, Trove, and Inventaire) race next. Each covers a different sweet spot (classics & library-catalogued, popular modern, contemporary popular fiction & non-fiction, academic & textbooks, niche US-published & children's, Australian-published, multilingual European editions) so almost every book is found — fast
 - **Background cover search** — cover art is hunted in parallel with the metadata lookup (never delaying the New Book sheet) and keeps searching in the background after the book is saved, attaching the cover while the next book is already being scanned
-- **Rich cover art** — searches eight sources concurrently (Open Library, Google Books ×3, WorldCat, Bookcover API, Better World Books, and Open Library search) and picks the best available image
+- **Rich cover art** — searches nine sources concurrently (Open Library covers, Google Books ×3, Apple Books, WorldCat, Bookcover API, Better World Books, and Open Library search) and picks the best available image
 
 ### Library Management
 - **Named shelves** — organise books into as many shelves as you like; drag between shelves at any time
@@ -89,9 +89,10 @@ If BookScan saves you time or you just find it useful, a small donation is great
 | Cloud sync & sharing | CloudKit (private + shared databases, `CKShare`) |
 | Camera / scanning | AVFoundation (`AVCaptureSession`, EAN-13) |
 | Image picking | PhotosUI (`PHPickerViewController`) |
-| Book metadata | Open Library, Google Books, Crossref, Library of Congress |
-| Cover images | Open Library Covers, Google Books, WorldCat, Bookcover API, Better World Books |
+| Book metadata | Open Library, Google Books, Crossref, Library of Congress, Trove, Inventaire |
+| Cover images | Open Library Covers, Google Books, Apple Books, WorldCat, Bookcover API, Better World Books, Inventaire |
 | Concurrency | Swift Structured Concurrency (`async/await`, `actor`, `async let`) |
+| Localization | String Catalog (`Localizable.xcstrings`), translation-ready with plural inflection |
 | Logging | `os.log` (unified logging) |
 | Tests | Swift Testing framework |
 
@@ -158,9 +159,11 @@ BookScan/
 │   ├── Components/
 │   │   ├── CoverImage.swift         — UIImage resize/normalise pipeline
 │   │   ├── DismissWhenDeleted.swift — Dismisses a view when its object is remotely deleted
+│   │   ├── EditBookDetailsView.swift— Re-query all sources and pick the correct edition
 │   │   ├── ImagePicker.swift        — Camera & photo library pickers
 │   │   ├── NewShelfAlert.swift      — Reusable "New Shelf" alert modifier
 │   │   ├── SharingPresenter.swift   — Presents UICloudSharingController (invite / manage / leave)
+│   │   ├── SheetHeader.swift        — Flat iOS-style sheet header bar + circular buttons
 │   │   └── WebCoverSearchView.swift — Web cover image grid picker
 │   ├── Library/
 │   │   ├── LibraryTabView.swift     — Main library with shelf sections + share button
@@ -170,6 +173,7 @@ BookScan/
 │   └── Scanner/
 │       ├── ScannerTabView.swift         — Single enum-driven sheet state machine
 │       ├── BarcodeScannerView.swift     — AVFoundation camera + EAN-13 decoder
+│       ├── CoverPipeline.swift          — Background cover search that attaches after save
 │       ├── NewBookView.swift            — Confirm & save a newly scanned book
 │       ├── ExistingBookView.swift       — Show location / return a found book
 │       └── ManualISBNEntryView.swift    — Keyboard ISBN entry with live validation
@@ -213,7 +217,7 @@ BookScan uses the following free, open APIs — no API keys required (except Tro
 | [Bookcover API](https://bookcover.longitood.com) | Cover images by ISBN |
 | [Better World Books](https://www.betterworldbooks.com) | Cover images by ISBN |
 
-All eight cover-image sources run **concurrently** and results are assembled in priority order, so the app shows the best available cover without waiting for slower sources. Crossref and the Library of Congress provide metadata only — cover images are handled by the other sources.
+All nine cover-image sources run **concurrently** and results are assembled in priority order, so the app shows the best available cover without waiting for slower sources. Crossref and the Library of Congress provide metadata only — cover images are handled by the other sources.
 
 ---
 
