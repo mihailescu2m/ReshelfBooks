@@ -125,7 +125,7 @@ struct SearchView: View {
             }
             .padding(12)
             .background(Color(.tertiarySystemBackground))
-            .cornerRadius(12)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .padding()
     }
@@ -226,7 +226,7 @@ struct SearchResultRow: View {
         HStack(spacing: 16) {
             BookCoverImage(imageData: book.coverImageData, title: book.title, size: .small)
                 .frame(width: 60, height: 90)
-                .cornerRadius(6)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .shadow(radius: 2)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -259,7 +259,7 @@ struct SearchResultRow: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title) by \(book.author), on shelf \(book.shelf?.name ?? "Unshelved")")
         .accessibilityHint("Double tap to view details")

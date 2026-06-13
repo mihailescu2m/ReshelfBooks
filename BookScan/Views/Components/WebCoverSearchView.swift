@@ -121,12 +121,12 @@ struct WebCoverSearchView: View {
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 100, height: 150)
                         .clipped()
-                        .cornerRadius(8)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 } else {
                     Rectangle()
                         .fill(Color.gray.opacity(0.2))
                         .frame(width: 100, height: 150)
-                        .cornerRadius(8)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                         .overlay {
                             ProgressView()
                         }

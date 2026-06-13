@@ -173,7 +173,7 @@ struct ScannerTabView: View {
             }
             .padding(32)
             .background(.ultraThinMaterial)
-            .cornerRadius(16)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 
@@ -194,7 +194,7 @@ struct ScannerTabView: View {
         }
         .padding()
         .background(Color.red.opacity(0.9))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var enterISBNButton: some View {
@@ -217,7 +217,7 @@ struct ScannerTabView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 12)
             .background(.ultraThinMaterial)
-            .cornerRadius(25)
+            .clipShape(RoundedRectangle(cornerRadius: 25))
         }
         .padding(.top, 20)
     }

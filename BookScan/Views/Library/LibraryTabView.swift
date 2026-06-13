@@ -305,7 +305,7 @@ struct LendingShelfSectionView: View {
         }
         .padding()
         .background(Color.orange.opacity(0.1))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -359,7 +359,7 @@ struct ShelfSectionView: View {
                     .frame(maxWidth: .infinity)
                     // One level above the tab's secondarySystemBackground surface.
                     .background(Color(.tertiarySystemBackground))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 16) {
@@ -395,7 +395,7 @@ struct BookCardView: View {
             VStack(alignment: .leading, spacing: 8) {
                 BookCoverImage(imageData: book.coverImageData, title: book.title, size: .medium)
                     .frame(width: 100, height: 150)
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     .shadow(radius: 2)
 
                 VStack(alignment: .leading, spacing: 2) {

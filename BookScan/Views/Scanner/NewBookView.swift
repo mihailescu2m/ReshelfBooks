@@ -70,7 +70,7 @@ struct NewBookView: View {
         HStack(spacing: 16) {
             coverImageView
                 .frame(width: 100, height: 150)
-                .cornerRadius(8)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(radius: 4)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -95,7 +95,7 @@ struct NewBookView: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -156,7 +156,7 @@ struct NewBookView: View {
                     .padding()
                     .frame(maxWidth: .infinity)
                     .background(Color(.tertiarySystemBackground))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 // Same adaptive grid as BookDetailContent's Shelf Assignment, so the
                 // column count matches across both screens at the same width.
@@ -169,7 +169,7 @@ struct NewBookView: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func shelfButton(_ shelf: Shelf) -> some View {
@@ -185,7 +185,7 @@ struct NewBookView: View {
             }
             .padding()
             .background(selectedShelf == shelf ? Color.accentColor.opacity(0.1) : Color(.tertiarySystemBackground))
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(selectedShelf == shelf ? Color.accentColor : Color.clear, lineWidth: 2)
@@ -200,12 +200,12 @@ struct NewBookView: View {
             dismiss()
         } label: {
             Text("Add to Library")
-                .font(.headline)
+                .font(.body.weight(.semibold))
                 .frame(maxWidth: .infinity)
-                .padding()
+                .frame(minHeight: 50)
                 .background(Color.accentColor)
                 .foregroundColor(.white)
-                .cornerRadius(12)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 }

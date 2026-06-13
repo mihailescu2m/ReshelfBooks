@@ -146,7 +146,7 @@ struct EditBookDetailsView: View {
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemBackground))
-            .cornerRadius(12)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(isCurrent ? Color.accentColor : Color.clear, lineWidth: 2)

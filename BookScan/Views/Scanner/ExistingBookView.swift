@@ -90,7 +90,7 @@ struct ExistingBookView: View {
         .padding()
         .frame(maxWidth: .infinity)
         .background(Color.green.opacity(0.1))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var countdownSection: some View {
@@ -127,12 +127,12 @@ struct ExistingBookView: View {
             dismiss()
         } label: {
             Text("Done")
-                .font(.headline)
+                .font(.body.weight(.semibold))
                 .frame(maxWidth: .infinity)
-                .padding()
+                .frame(minHeight: 50)
                 .background(Color.accentColor)
                 .foregroundColor(.white)
-                .cornerRadius(12)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -172,7 +172,7 @@ struct ExistingBookView: View {
         HStack(spacing: 16) {
             bookCoverImage
                 .frame(width: 100, height: 150)
-                .cornerRadius(8)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(radius: 4)
 
             VStack(alignment: .leading, spacing: 8) {
@@ -197,7 +197,7 @@ struct ExistingBookView: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -252,7 +252,7 @@ struct ExistingBookView: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 

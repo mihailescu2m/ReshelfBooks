@@ -63,7 +63,7 @@ struct ManualISBNEntryView: View {
                 .autocorrectionDisabled()
                 .padding()
                 .background(Color(.tertiarySystemBackground))
-                .cornerRadius(12)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
                         .stroke(isValidISBN ? Color.green : Color.clear, lineWidth: 2)
@@ -81,7 +81,7 @@ struct ManualISBNEntryView: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(16)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var helperTextSection: some View {
@@ -98,7 +98,7 @@ struct ManualISBNEntryView: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(16)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private func helperItem(icon: String, text: String) -> some View {
@@ -117,12 +117,12 @@ struct ManualISBNEntryView: View {
             onLookup(ISBNValidator.normalize(isbn))
         } label: {
             Text("Look Up Book")
-                .font(.headline)
+                .font(.body.weight(.semibold))
                 .frame(maxWidth: .infinity)
-                .padding()
+                .frame(minHeight: 50)
                 .background(isValidISBN ? Color.accentColor : Color.gray)
                 .foregroundColor(.white)
-                .cornerRadius(12)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .disabled(!isValidISBN)
     }

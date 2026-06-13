@@ -84,7 +84,7 @@ struct BookDetailContent: View {
         VStack(spacing: 12) {
             BookCoverImage(imageData: book.coverImageData, title: book.title, size: .large)
                 .frame(width: 150, height: 225)
-                .cornerRadius(12)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 .shadow(radius: 8)
                 .overlay(alignment: .topTrailing) {
                     coverButton(icon: "pencil", accessibilityLabel: "Edit book details") {
@@ -137,7 +137,7 @@ struct BookDetailContent: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func infoRow(label: String, value: String) -> some View {
@@ -182,7 +182,7 @@ struct BookDetailContent: View {
                     .padding()
                     .frame(maxWidth: .infinity)
                     .background(Color(.tertiarySystemBackground))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             } else if shelves.regularShelves.isEmpty {
                 Text("No shelves available. Create one to organize this book.")
                     .font(.subheadline)
@@ -190,7 +190,7 @@ struct BookDetailContent: View {
                     .padding()
                     .frame(maxWidth: .infinity)
                     .background(Color(.tertiarySystemBackground))
-                    .cornerRadius(8)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 // Adaptive grid: fits as many columns as the available width allows.
                 // min 260 pt → 1 column in portrait, 2+ columns in landscape and on iPad,
@@ -206,7 +206,7 @@ struct BookDetailContent: View {
         }
         .padding()
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func shelfOption(_ shelf: Shelf?, label: String) -> some View {
@@ -236,7 +236,7 @@ struct BookDetailContent: View {
             }
             .padding()
             .background(isSelected ? Color.accentColor.opacity(0.1) : Color(.tertiarySystemBackground))
-            .cornerRadius(8)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
@@ -261,11 +261,12 @@ struct BookDetailContent: View {
                         Image(systemName: "arrow.down.backward")
                         Text("Return")
                     }
+                    .fontWeight(.medium)
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Color.green.opacity(0.1))
                     .foregroundColor(.green)
-                    .cornerRadius(12)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .accessibilityLabel("Return book")
                 .accessibilityHint("Double tap to return this book to its original shelf")
@@ -278,11 +279,12 @@ struct BookDetailContent: View {
                         Image(systemName: "arrow.up.forward")
                         Text("Lend")
                     }
+                    .fontWeight(.medium)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.blue.opacity(0.1))
-                    .foregroundColor(.blue)
-                    .cornerRadius(12)
+                    .background(Color.accentColor.opacity(0.1))
+                    .foregroundColor(.accentColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .accessibilityLabel("Lend book")
                 .accessibilityHint("Double tap to mark this book as lent")
@@ -296,11 +298,12 @@ struct BookDetailContent: View {
                     Image(systemName: "trash")
                     Text("Delete")
                 }
+                .fontWeight(.medium)
                 .frame(maxWidth: .infinity)
                 .padding()
                 .background(Color.red.opacity(0.1))
                 .foregroundColor(.red)
-                .cornerRadius(12)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .accessibilityLabel("Delete book")
             .accessibilityHint("Double tap to delete this book permanently")
@@ -361,6 +364,8 @@ struct BookDetailContent: View {
                 message: "This book will be returned to its original shelf.",
                 actionLabel: "Return",
                 actionRole: nil,
+                // Green to match the green Return button that opens this sheet.
+                actionTint: .green,
                 bottomPadding: sheetBottomPadding
             ) { returnBook() }
 
@@ -476,13 +481,16 @@ private struct ConfirmationSheet: View {
     let message: String
     let actionLabel: String
     let actionRole: ButtonRole?
+    /// Overrides the default action-button fill (so Return can use green to match its
+    /// green action-row button). nil falls back to the role-based default.
+    var actionTint: Color? = nil
     /// Bottom padding inside the card. Computed by the parent (see sheetBottomPadding) so it
     /// doesn't double up on the home-indicator safe area.
     var bottomPadding: CGFloat = 0
     let onConfirm: () -> Void
 
     private var actionColor: Color {
-        actionRole == .destructive ? .red : .accentColor
+        actionTint ?? (actionRole == .destructive ? .red : .accentColor)
     }
 
     var body: some View {
@@ -638,14 +646,15 @@ private struct CoverSourceSheet: View {
         VStack(spacing: SheetMetrics.outerSpacing) {
             metrics.header(title: "Change Cover Image", message: "Select image source from below.")
 
-            // Match the Book Details action-row buttons: faint tinted fill with
-            // colored text — blue (like Lend) for the source options, red (like
-            // Delete) for Remove Cover.
-            metrics.pillButton("Take Photo", fill: .blue.opacity(0.1), foreground: .blue, weight: .regular) { onSelect(.camera) }
-            metrics.pillButton("Choose from Library", fill: .blue.opacity(0.1), foreground: .blue, weight: .regular) { onSelect(.library) }
-            metrics.pillButton("Search the Web", fill: .blue.opacity(0.1), foreground: .blue, weight: .regular) { onSelect(.web) }
+            // Faint tinted fills with colored text — accent for the source options,
+            // red for Remove Cover. Medium weight matches Cancel, so the half-sheet
+            // family uses just two weights (medium here, semibold for the prominent
+            // confirm actions in ConfirmationSheet).
+            metrics.pillButton("Take Photo", fill: .accentColor.opacity(0.1), foreground: .accentColor, weight: .medium) { onSelect(.camera) }
+            metrics.pillButton("Choose from Library", fill: .accentColor.opacity(0.1), foreground: .accentColor, weight: .medium) { onSelect(.library) }
+            metrics.pillButton("Search the Web", fill: .accentColor.opacity(0.1), foreground: .accentColor, weight: .medium) { onSelect(.web) }
             if hasCover {
-                metrics.pillButton("Remove Cover", fill: .red.opacity(0.1), foreground: .red, weight: .regular, role: .destructive) { onSelect(.remove) }
+                metrics.pillButton("Remove Cover", fill: .red.opacity(0.1), foreground: .red, weight: .medium, role: .destructive) { onSelect(.remove) }
             }
 
             // Cancel — neutral grey, matches ConfirmationSheet's Cancel.
