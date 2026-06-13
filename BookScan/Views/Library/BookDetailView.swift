@@ -16,14 +16,11 @@ struct BookDetailView: View {
     var body: some View {
         // No NavigationStack — this sheet is presented from within LibraryTabView's
         // NavigationStack; nesting a second one causes a fatal nav-bar conflict on iPad.
-        VStack(spacing: 0) {
-            ZStack {
-                Text("Book Details").font(.headline)
-                HStack { Spacer(); Button("Done") { dismiss() } }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            Divider()
+        SheetHeaderContainer {
+            SheetHeaderBar(title: "Book Details", trailing: {
+                CircularIconButton(systemName: "checkmark", prominent: true, accessibilityLabel: "Done") { dismiss() }
+            })
+        } content: {
             BookDetailContent(book: book, shelves: shelves) { dismiss() }
         }
     }

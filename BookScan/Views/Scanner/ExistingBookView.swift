@@ -27,48 +27,50 @@ struct ExistingBookView: View {
     var body: some View {
         // No NavigationStack — presented as a sheet from ScannerTabView's NavigationStack;
         // nesting a second one causes a fatal nav-bar conflict on iPad.
-        VStack(spacing: 0) {
-            ZStack {
-                Text("Book Location").font(.headline)
-                HStack { Spacer(); Button("Done") { dismiss() } }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            Divider()
+        SheetHeaderContainer {
+            SheetHeaderBar(title: "Book Location", trailing: {
+                CircularIconButton(systemName: "checkmark", prominent: true, accessibilityLabel: "Done") { dismiss() }
+            })
+        } content: {
             Group {
                 // If a family member deletes this book while it's on screen, its
                 // relationships fault to rows that no longer exist — don't render them.
                 if book.isGone {
                     Color.clear
                 } else {
-                    VStack(spacing: 24) {
-                        Text(wasReturned ? "Book Returned" : "Book Found")
-                            .font(.title2)
-                            .fontWeight(.bold)
+                    // Scrollable so the title + banner + cards + countdown can't be
+                    // clipped on small screens with the header inset added.
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            Text(wasReturned ? "Book Returned" : "Book Found")
+                                .font(.title2)
+                                .fontWeight(.bold)
 
-                        if wasReturned {
-                            returnedBanner
+                            if wasReturned {
+                                returnedBanner
+                            }
+
+                            bookInfoCard
+
+                            notRightBookLink
+
+                            shelfLocationCard
+
+                            Spacer(minLength: 24)
+
+                            if isAutoDismissActive {
+                                countdownSection
+                            } else {
+                                doneButton
+                            }
                         }
-
-                        bookInfoCard
-
-                        notRightBookLink
-
-                        shelfLocationCard
-
-                        Spacer()
-
-                        if isAutoDismissActive {
-                            countdownSection
-                        } else {
-                            doneButton
+                        .padding()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            cancelAutoDismiss()
                         }
                     }
-                    .padding()
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        cancelAutoDismiss()
-                    }
+                    .scrollsBehindHeader()
                 }
             }
             .task {

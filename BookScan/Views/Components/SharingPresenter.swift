@@ -31,6 +31,9 @@ enum SharingPresenter {
         // Everyone who joins gets full read/write; no public link, no read-only.
         controller.availablePermissions = [.allowReadWrite, .allowPrivate]
 
+        // Match the app's sheet corner radius so the system share sheet looks at home.
+        controller.sheetPresentationController?.preferredCornerRadius = SheetStyle.cornerRadius
+
         presenter.present(controller, animated: true)
     }
 

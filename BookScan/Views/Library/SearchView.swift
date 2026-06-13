@@ -34,25 +34,25 @@ struct SearchView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Custom header — same pattern as all other sheets in the app
-                ZStack {
-                    Text("Search").font(.headline)
-                    HStack { Button("Cancel") { dismiss() }; Spacer() }
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
-                Divider()
+            SheetHeaderContainer {
+                SheetHeaderBar(title: "Search", leading: {
+                    CircularIconButton(systemName: "xmark", accessibilityLabel: "Cancel") { dismiss() }
+                })
+            } content: {
+                VStack(spacing: 0) {
+                    searchBar
 
-                searchBar
-
-                if debouncedSearchText.isEmpty {
-                    emptySearchView
-                } else if filteredBooks.isEmpty {
-                    noResultsView
-                } else {
-                    searchResultsList
+                    if debouncedSearchText.isEmpty {
+                        emptySearchView
+                    } else if filteredBooks.isEmpty {
+                        noResultsView
+                    } else {
+                        searchResultsList
+                    }
                 }
+                // The search field sits below the floating header; results scroll
+                // behind it (the inner ScrollView picks up the content inset).
+                .padding(.top, SheetStyle.headerHeight + 8)
             }
             .toolbar(.hidden, for: .navigationBar)
             .onAppear {
@@ -275,14 +275,11 @@ struct SearchBookDetailView: View {
     let shelves: [Shelf]
 
     var body: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                Text("Book Details").font(.headline)
-                HStack { Button("Back") { dismiss() }; Spacer() }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            Divider()
+        SheetHeaderContainer {
+            SheetHeaderBar(title: "Book Details", leading: {
+                CircularIconButton(systemName: "chevron.left", accessibilityLabel: "Back") { dismiss() }
+            })
+        } content: {
             BookDetailContent(book: book, shelves: shelves) {
                 dismiss()
             }

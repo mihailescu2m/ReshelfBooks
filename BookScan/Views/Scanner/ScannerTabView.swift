@@ -41,7 +41,6 @@ struct ScannerTabView: View {
     /// it is, so we don't hold the camera (and show the green indicator) on other tabs.
     var isTabActive: Bool = true
 
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var persistence: PersistenceController
     @FetchRequest(sortDescriptors: []) private var books: FetchedResults<Book>
     @FetchRequest(sortDescriptors: [
@@ -114,27 +113,16 @@ struct ScannerTabView: View {
         }
     }
 
-    /// Inline header overlaid on the camera (replaces the old nav-bar toolbar).
-    /// The material background keeps the centered title and reset button legible.
+    /// Floating header overlaid on the camera (replaces the old nav-bar toolbar).
+    /// Same translucent bar as every sheet — the camera feed blurs through it.
     private var header: some View {
-        ZStack {
-            Text("Scan Book")
-                .font(.headline)
-                .foregroundStyle(.primary)
-
-            HStack {
-                Spacer()
-                Button {
-                    resetScanner()
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .disabled(isScanning && !isLoading)
+        // Opaque, same surface as the Library header, so the two tabs match.
+        SheetHeaderBar(title: "Scan Book", background: AnyShapeStyle(Color(.secondarySystemBackground)), trailing: {
+            CircularIconButton(systemName: "arrow.counterclockwise", accessibilityLabel: "Reset scanner") {
+                resetScanner()
             }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
+            .disabled(isScanning && !isLoading)
+        })
     }
 
     @ViewBuilder
@@ -144,6 +132,7 @@ struct ScannerTabView: View {
             ExistingBookView(book: book, wasReturned: wasReturned, onManualEntry: {
                 transitionToManualEntry()
             })
+            .standardSheetPresentation()
         case .newBook(let metadata):
             NewBookView(
                 metadata: metadata,
@@ -156,17 +145,16 @@ struct ScannerTabView: View {
                     transitionToManualEntry()
                 }
             )
+            .standardSheetPresentation()
         case .manualEntry(let isbn):
             // Use .sheet (not .fullScreenCover) so this doesn't share the parent
-            // navigation context — fullScreenCover on iPad causes a crash. On iPhone
-            // (compact) remove the corner radius so it looks like a full-screen cover;
-            // on iPad keep the default radius.
+            // navigation context — fullScreenCover on iPad causes a crash.
             ManualISBNEntryView(initialISBN: isbn, onLookup: { lookupISBN in
                 pendingAction = .lookup(lookupISBN)
                 activeSheet = nil
             })
             .presentationDetents([.large])
-            .presentationCornerRadius(horizontalSizeClass == .compact ? 0 : 12)
+            .standardSheetPresentation()
         }
     }
 
@@ -211,6 +199,13 @@ struct ScannerTabView: View {
 
     private var enterISBNButton: some View {
         Button {
+            // Abandon any in-flight lookup: its completion would otherwise replace
+            // the manual-entry sheet with a New Book sheet mid-typing.
+            lookupTask?.cancel()
+            lookupTask = nil
+            coverPipeline?.cancel()
+            coverPipeline = nil
+            isLoading = false
             isScanning = false
             activeSheet = .manualEntry(initialISBN: scannedCode)
         } label: {

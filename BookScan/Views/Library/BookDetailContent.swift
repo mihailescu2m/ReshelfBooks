@@ -52,6 +52,7 @@ struct BookDetailContent: View {
                 .padding()
             }
         }
+        .scrollsBehindHeader()
         .dismissWhenDeleted(book)
         .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
             book.shelf = newShelf
@@ -386,6 +387,7 @@ struct BookDetailContent: View {
                 author: book.author,
                 selectedImage: $selectedImage
             )
+            .standardSheetPresentation()
 
         case .editMetadata:
             EditBookDetailsView(
@@ -401,6 +403,7 @@ struct BookDetailContent: View {
                 book.yearPublished = metadata.yearPublished
                 persistence.save()
             }
+            .standardSheetPresentation()
         }
     }
 

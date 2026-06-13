@@ -28,14 +28,11 @@ struct EditBookDetailsView: View {
     var body: some View {
         // No NavigationStack — presented as a sheet from BookDetailContent's parent
         // NavigationStack; nesting a second one causes a fatal nav-bar conflict on iPad.
-        VStack(spacing: 0) {
-            ZStack {
-                Text("Edit Book").font(.headline)
-                HStack { Button("Cancel") { dismiss() }; Spacer() }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            Divider()
+        SheetHeaderContainer {
+            SheetHeaderBar(title: "Edit Book", leading: {
+                CircularIconButton(systemName: "xmark", accessibilityLabel: "Cancel") { dismiss() }
+            })
+        } content: {
             Group {
                 if isSearching {
                     loadingView
@@ -45,6 +42,7 @@ struct EditBookDetailsView: View {
                     resultsList
                 }
             }
+            .scrollsBehindHeader()
             .task {
                 descriptions = await ISBNLookupService.shared.lookupAllDescriptions(isbn: isbn)
                 isSearching = false

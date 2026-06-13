@@ -40,18 +40,13 @@ struct NewBookView: View {
     var body: some View {
         // No NavigationStack — presented as a sheet from ScannerTabView's NavigationStack;
         // nesting a second one causes a fatal nav-bar conflict on iPad.
-        VStack(spacing: 0) {
-            ZStack {
-                Text("New Book").font(.headline)
-                HStack { Button("Cancel") { dismiss() }; Spacer() }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            Divider()
+        SheetHeaderContainer {
+            SheetHeaderBar(title: "New Book", leading: {
+                CircularIconButton(systemName: "xmark", accessibilityLabel: "Cancel") { dismiss() }
+            })
+        } content: {
             ScrollView {
                 VStack(spacing: 24) {
-                    headerSection
-
                     bookInfoSection
 
                     notRightBookLink
@@ -64,16 +59,11 @@ struct NewBookView: View {
                 }
                 .padding()
             }
+            .scrollsBehindHeader()
             .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
                 selectedShelf = newShelf
             }
         }
-    }
-
-    private var headerSection: some View {
-        Text("Add to Library")
-            .font(.title2)
-            .fontWeight(.bold)
     }
 
     private var bookInfoSection: some View {

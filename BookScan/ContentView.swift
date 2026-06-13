@@ -29,6 +29,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingSearch) {
             SearchView()
+                .standardSheetPresentation()
         }
         // Shown only after joining a shared library while the joiner still has local
         // books: park them privately (hidden until the share ends) or move them in.

@@ -25,18 +25,13 @@ struct ManualISBNEntryView: View {
     var body: some View {
         // No NavigationStack — presented as a sheet from ScannerTabView's NavigationStack;
         // nesting a second one causes a fatal nav-bar conflict on iPad.
-        VStack(spacing: 0) {
-            ZStack {
-                Text("Enter ISBN").font(.headline)
-                HStack { Button("Cancel") { dismiss() }; Spacer() }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 12)
-            Divider()
+        SheetHeaderContainer {
+            SheetHeaderBar(title: "Enter ISBN", leading: {
+                CircularIconButton(systemName: "xmark", accessibilityLabel: "Cancel") { dismiss() }
+            })
+        } content: {
             ScrollView {
                 VStack(spacing: 32) {
-                    headerSection
-
                     inputSection
 
                     helperTextSection
@@ -45,6 +40,7 @@ struct ManualISBNEntryView: View {
                 }
                 .padding()
             }
+            .scrollsBehindHeader()
             .onAppear {
                 if let initialISBN = initialISBN {
                     isbn = initialISBN
@@ -53,19 +49,6 @@ struct ManualISBNEntryView: View {
                 isTextFieldFocused = true
             }
         }
-    }
-
-    private var headerSection: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "keyboard")
-                .font(.system(size: 50))
-                .foregroundColor(.accentColor)
-
-            Text("Enter ISBN Manually")
-                .font(.title2)
-                .fontWeight(.bold)
-        }
-        .padding(.top, 20)
     }
 
     private var inputSection: some View {

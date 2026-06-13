@@ -41,10 +41,10 @@ struct LibraryTabView: View {
         // TabView (backed by UIPageViewController). Wrapping each tab in its own
         // NavigationStack nests wrapped navigation controllers, which crashes on iPad
         // (NSInternalInconsistencyException) when both pages lay out at once. The
-        // toolbar is replaced by an inline header instead.
-        VStack(spacing: 0) {
+        // toolbar is replaced by a floating header instead.
+        SheetHeaderContainer {
             header
-            Divider()
+        } content: {
             Group {
                 if isLibraryEmpty {
                     emptyLibraryView
@@ -58,6 +58,7 @@ struct LibraryTabView: View {
                 BookDetailView(book: book, shelves: visibleShelves)
                     .presentationDetents([.large])
                     .presentationSizing(.page)
+                    .standardSheetPresentation()
             }
             .onAppear {
                 persistence.refreshSharedState()
@@ -68,34 +69,27 @@ struct LibraryTabView: View {
                 Text("Family sharing needs iCloud. Make sure you're signed into iCloud in Settings, then try again.")
             }
         }
+        // Elevated gray (matches the system share sheet) instead of pure black, so
+        // the translucent header reads as a seamless region of the same surface.
+        .background(Color(.secondarySystemBackground).ignoresSafeArea())
     }
 
     private var header: some View {
-        ZStack {
-            Text(persistence.isLibraryShared ? "Shared Library" : "Library")
-                .font(.headline)
-                .foregroundStyle(.primary)
-
-            HStack {
-                Button {
+        SheetHeaderBar(
+            title: persistence.isLibraryShared ? "Shared Library" : "Library",
+            // Same surface as the page background, so the bar is seamless.
+            background: AnyShapeStyle(Color(.secondarySystemBackground)),
+            leading: {
+                CircularIconButton(systemName: "square.and.arrow.up", accessibilityLabel: "Share Library") {
                     presentSharing()
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
                 }
-                .accessibilityLabel("Share Library")
-
-                Spacer()
-
-                Button {
+            },
+            trailing: {
+                CircularIconButton(systemName: "plus", accessibilityLabel: "Add Shelf") {
                     showingNewShelfAlert = true
-                } label: {
-                    Image(systemName: "plus")
                 }
-                .accessibilityLabel("Add Shelf")
             }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        )
     }
 
     /// Opens the family-sharing sheet. Resolves (creating if needed) the library and
@@ -223,6 +217,8 @@ struct LibraryTabView: View {
         // Clear the floating tab bar (overlaid by ContentView) so the last shelf/book
         // can scroll above it instead of being hidden behind it.
         .contentMargins(.bottom, 90, for: .scrollContent)
+        // Shelves scroll behind the floating header and blur through it.
+        .scrollsBehindHeader()
     }
 
     private var unshelvedBooks: [Book] {
@@ -361,7 +357,8 @@ struct ShelfSectionView: View {
                     .foregroundColor(.secondary)
                     .padding()
                     .frame(maxWidth: .infinity)
-                    .background(Color(.secondarySystemBackground))
+                    // One level above the tab's secondarySystemBackground surface.
+                    .background(Color(.tertiarySystemBackground))
                     .cornerRadius(8)
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
