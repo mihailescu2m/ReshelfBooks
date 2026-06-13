@@ -184,6 +184,50 @@ struct BookModelTests {
         #expect(book.previousShelf == nil)
         #expect(book.isLent == false)
     }
+
+    @Test("Book lend(to:borrower:) records the borrower and lend date")
+    func bookLendRecordsBorrower() {
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
+        let lendingShelf = makeShelf(in: context, name: "Lent", isLendingShelf: true)
+
+        book.lend(to: lendingShelf, borrower: "Alice")
+
+        #expect(book.borrower == "Alice")
+        #expect(book.borrowerName == "Alice")
+        #expect(book.dateLent != nil)
+    }
+
+    @Test("Book lend(to:borrower:) treats a blank borrower as anonymous")
+    func bookLendBlankBorrowerIsAnonymous() {
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
+        let lendingShelf = makeShelf(in: context, name: "Lent", isLendingShelf: true)
+
+        book.lend(to: lendingShelf, borrower: "   ")
+
+        #expect(book.borrower == nil)
+        #expect(book.borrowerName == nil)
+        // Still lent, with a date — just no named borrower.
+        #expect(book.isLent == true)
+        #expect(book.dateLent != nil)
+    }
+
+    @Test("Book returnBook() clears the borrower and lend date")
+    func bookReturnClearsBorrower() {
+        let context = makeTestContext()
+        let book = makeBook(in: context, isbn: "9780141439518", title: "Pride and Prejudice", author: "Jane Austen", yearPublished: "1813")
+        let originalShelf = makeShelf(in: context, name: "Fiction", isLendingShelf: false)
+        let lendingShelf = makeShelf(in: context, name: "Lent", sortOrder: 1, isLendingShelf: true)
+
+        book.shelf = originalShelf
+        book.lend(to: lendingShelf, borrower: "Bob")
+        book.returnBook()
+
+        #expect(book.shelf === originalShelf)
+        #expect(book.borrower == nil)
+        #expect(book.dateLent == nil)
+    }
 }
 
 // MARK: - Shelf Model Tests

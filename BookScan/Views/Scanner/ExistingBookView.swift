@@ -11,6 +11,9 @@ struct ExistingBookView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var book: Book
     let wasReturned: Bool
+    /// Borrower name captured before the book was returned (see ScannerTabView), so the
+    /// banner can say who returned it. nil = anonymous lend or not a return.
+    let returnedFrom: String?
     let onManualEntry: (() -> Void)?
 
     // Quick Scan Mode
@@ -18,9 +21,10 @@ struct ExistingBookView: View {
     @State private var timeRemaining: Double = 5.0
     @State private var isAutoDismissActive = true
 
-    init(book: Book, wasReturned: Bool = false, onManualEntry: (() -> Void)? = nil) {
+    init(book: Book, wasReturned: Bool = false, returnedFrom: String? = nil, onManualEntry: (() -> Void)? = nil) {
         self.book = book
         self.wasReturned = wasReturned
+        self.returnedFrom = returnedFrom
         self.onManualEntry = onManualEntry
     }
 
@@ -84,7 +88,8 @@ struct ExistingBookView: View {
         HStack {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(.green)
-            Text("This book has been returned to your library")
+            Text(returnedFrom.map { String(localized: "Returned from \($0)") }
+                 ?? String(localized: "This book has been returned to your library"))
                 .font(.subheadline)
         }
         .padding()

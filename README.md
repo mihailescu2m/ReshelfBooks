@@ -62,8 +62,9 @@ If BookScan saves you time or you just find it useful, a small donation is great
 - **Full-text search** — find any book instantly by title, author, or ISBN with a 300 ms debounced search
 
 ### Lending Tracker
-- **Lend a book** — one tap moves a book to the dedicated *Lent* shelf and remembers which shelf it came from
-- **Return via barcode** — scanning a lent book's barcode automatically returns it to its original shelf; a confirmation screen shows where to put it back
+- **Lend to a named person** — record who borrowed the book; tap a recent-borrower chip to lend in a single tap, or leave it blank for a quick anonymous lend. The book moves to the dedicated *Lent* shelf, remembering which shelf it came from
+- **See who has what** — lent books show "Lent to Alice" and how long ago, on the card and in the detail view
+- **Return via barcode** — scanning a lent book's barcode automatically returns it to its original shelf and confirms "Returned from Alice", showing where to put it back
 - **Scan-to-return flow** — the scanner recognises lent books and triggers the return action immediately, no menus required
 
 ### Sync & Family Sharing

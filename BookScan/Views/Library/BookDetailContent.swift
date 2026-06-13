@@ -176,13 +176,7 @@ struct BookDetailContent: View {
             }
 
             if book.isLent {
-                Text("This book is lent. Use Return to move it back to its shelf.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color(.tertiarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                lentStatusBanner
             } else if shelves.regularShelves.isEmpty {
                 Text("No shelves available. Create one to organize this book.")
                     .font(.subheadline)
@@ -207,6 +201,36 @@ struct BookDetailContent: View {
         .padding()
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Shown in place of the shelf grid while a book is lent: who has it (if named)
+    /// and how long ago, plus the reminder to use Return.
+    private var lentStatusBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(book.borrowerName.map { String(localized: "Lent to \($0)") }
+                     ?? String(localized: "This book is lent"))
+                    .fontWeight(.medium)
+            } icon: {
+                Image(systemName: "person.fill")
+                    .foregroundColor(.accentColor)
+            }
+            .font(.subheadline)
+
+            if let lentDate = book.dateLent {
+                Text("Lent \(lentDate.formatted(.relative(presentation: .named)))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Text("Use Return to move it back to its shelf.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.tertiarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func shelfOption(_ shelf: Shelf?, label: String) -> some View {
@@ -328,13 +352,9 @@ struct BookDetailContent: View {
             ) { deleteBook() }
 
         case .lendConfirmation:
-            ConfirmationSheet(
-                title: "Lend Book",
-                message: "This book will be moved to the Lent shelf.",
-                actionLabel: "Lend",
-                actionRole: nil,
-                bottomPadding: sheetBottomPadding
-            ) { lendBook() }
+            LendSheet(recentBorrowers: persistence.recentBorrowers()) { borrower in
+                lendBook(borrower: borrower)
+            }
 
         case .returnConfirmation:
             ConfirmationSheet(
@@ -414,7 +434,7 @@ struct BookDetailContent: View {
         onDelete?()
     }
 
-    private func lendBook() {
+    private func lendBook(borrower: String) {
         guard let lendingShelf = persistence.lendingShelf(creatingIfNeeded: true) else {
             // The lending shelf is created on demand; guard the edge case where it
             // can't be (e.g. no writable store) by surfacing an error, not failing silently.
@@ -423,8 +443,10 @@ struct BookDetailContent: View {
         }
 
         withAnimation {
-            book.lend(to: lendingShelf)
+            book.lend(to: lendingShelf, borrower: borrower)
         }
+        // Remember the name for the Lend sheet's quick-tap chips next time.
+        persistence.recordBorrower(borrower)
         persistence.save()
         dismiss()
     }
@@ -663,6 +685,109 @@ private struct CoverSourceSheet: View {
         .presentationCornerRadius(24)
         .presentationBackground { Color(.systemBackground).ignoresSafeArea() }
         .presentationDragIndicator(.hidden)
+    }
+}
+
+// MARK: - Lend Sheet (borrower entry)
+
+/// Half-sheet for lending a book to a named person. The recent-borrower chips are the
+/// fast path — tapping one lends immediately. Typing a new name then Lend (or the
+/// keyboard's Done) handles first-time borrowers; leaving the field blank performs an
+/// anonymous lend, preserving the previous one-tap behavior. The sheet is sized to its
+/// content via a `.height` detent so iOS floats it above the keyboard, keeping the
+/// buttons reachable while typing.
+private struct LendSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    private let metrics = SheetMetrics()
+
+    let recentBorrowers: [String]
+    /// Reports the chosen borrower (possibly empty for an anonymous lend); the parent
+    /// performs the lend after this sheet dismisses.
+    let onLend: (String) -> Void
+
+    @State private var name: String = ""
+
+    var body: some View {
+        VStack(spacing: SheetMetrics.outerSpacing) {
+            metrics.header(title: "Lend Book", message: "Who's borrowing it?")
+
+            HStack(spacing: 8) {
+                Image(systemName: "person")
+                    .foregroundColor(.secondary)
+                TextField("Name", text: $name)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .onSubmit { lend(name) }
+            }
+            .padding(12)
+            // Same translucent fill as the search box: contrasts on the systemBackground
+            // sheet in both light and dark (tertiarySystemBackground is white in light).
+            .background(Color(.tertiarySystemFill))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            if !recentBorrowers.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Recent — tap to lend now")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // Single scrolling row rather than wrapping flow — deterministic
+                    // height (so the detent math stays exact) and a familiar iOS pattern.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(recentBorrowers, id: \.self) { borrower in
+                                Button { lend(borrower) } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "person.crop.circle")
+                                        Text(borrower)
+                                    }
+                                    .font(.subheadline)
+                                    .padding(.horizontal, 13)
+                                    .padding(.vertical, 8)
+                                    .background(Color.accentColor.opacity(0.12))
+                                    .foregroundColor(.accentColor)
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Lend to \(borrower)")
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                }
+            }
+
+            metrics.pillButton("Lend", fill: .accentColor, weight: .semibold) { lend(name) }
+            metrics.pillButton("Cancel", fill: Color(.systemGray5), foreground: .primary, weight: .medium) {
+                dismiss()
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, SheetMetrics.topPadding)
+        .padding(.bottom, SheetMetrics.defaultBottomPadding)
+        .frame(maxWidth: .infinity)
+        .presentationDetents([.height(sheetHeight)])
+        .presentationCornerRadius(24)
+        .presentationBackground { Color(.systemBackground).ignoresSafeArea() }
+        .presentationDragIndicator(.hidden)
+    }
+
+    /// Header + 2 pill buttons via the shared metric math, plus the name field and the
+    /// optional recents row, so the sheet is exactly as tall as its content.
+    private var sheetHeight: CGFloat {
+        var h = metrics.height(buttonCount: 2, bottomPadding: SheetMetrics.defaultBottomPadding)
+        h += 46 + SheetMetrics.outerSpacing                       // name field row
+        if !recentBorrowers.isEmpty {
+            h += 16 + 8 + 38 + SheetMetrics.outerSpacing          // caption + chip row
+        }
+        return h
+    }
+
+    private func lend(_ borrower: String) {
+        dismiss()
+        onLend(borrower)
     }
 }
 

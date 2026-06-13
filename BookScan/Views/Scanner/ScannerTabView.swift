@@ -12,13 +12,15 @@ import CoreData
 /// so SwiftUI never has two competing presentation state machines on the same view —
 /// which causes the first presentation to be immediately dismissed on iPad.
 enum ScannerSheet: Identifiable {
-    case existingBook(Book, wasReturned: Bool)
+    // returnedFrom carries the borrower name captured *before* returnBook() cleared it,
+    // so the "Returned from X" banner can name them. nil for an anonymous/non-return.
+    case existingBook(Book, wasReturned: Bool, returnedFrom: String?)
     case newBook(BookMetadata)
     case manualEntry(initialISBN: String?)
 
     var id: String {
         switch self {
-        case .existingBook(let book, _):
+        case .existingBook(let book, _, _):
             return "existing-\(book.isbn)"
         case .newBook(let metadata):
             return "new-\(metadata.isbn)"
@@ -128,8 +130,8 @@ struct ScannerTabView: View {
     @ViewBuilder
     private func sheetContent(for sheet: ScannerSheet) -> some View {
         switch sheet {
-        case .existingBook(let book, let wasReturned):
-            ExistingBookView(book: book, wasReturned: wasReturned, onManualEntry: {
+        case .existingBook(let book, let wasReturned, let returnedFrom):
+            ExistingBookView(book: book, wasReturned: wasReturned, returnedFrom: returnedFrom, onManualEntry: {
                 transitionToManualEntry()
             })
             .standardSheetPresentation()
@@ -257,11 +259,14 @@ struct ScannerTabView: View {
         if let book = persistence.visibleOnly(books).first(where: { ISBNValidator.canonicalize($0.isbn) == isbn }) {
             // Scanning a lent book returns it (per the lending shelf's instructions).
             if book.isLent {
+                // Capture the borrower before returnBook() clears it, so the banner
+                // can say who returned it.
+                let returnedFrom = book.borrowerName
                 book.returnBook()
                 persistence.save()
-                activeSheet = .existingBook(book, wasReturned: true)
+                activeSheet = .existingBook(book, wasReturned: true, returnedFrom: returnedFrom)
             } else {
-                activeSheet = .existingBook(book, wasReturned: false)
+                activeSheet = .existingBook(book, wasReturned: false, returnedFrom: nil)
             }
         } else {
             lookupBook(isbn: isbn)

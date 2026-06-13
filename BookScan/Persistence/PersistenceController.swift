@@ -427,6 +427,50 @@ final class PersistenceController: ObservableObject {
         return makeShelf(name: "Lent", isLendingShelf: true)
     }
 
+    // MARK: - Recent borrowers (Lend sheet autocomplete)
+
+    private static let recentBorrowersKey = "recent_borrowers"
+    private static let recentBorrowersLimit = 12
+
+    /// Names suggested as quick chips in the Lend sheet, most-recent first. Combines a
+    /// device-local history (recorded at lend time via `recordBorrower`, so a name
+    /// survives the book being returned) with whoever currently holds a visible book
+    /// (so a freshly synced device still shows active borrowers). Deduped
+    /// case-insensitively.
+    func recentBorrowers() -> [String] {
+        var ordered: [String] = []
+        var seen = Set<String>()
+        func add(_ name: String) {
+            let key = name.lowercased()
+            guard !seen.contains(key) else { return }
+            seen.insert(key)
+            ordered.append(name)
+        }
+
+        let history = UserDefaults.standard.stringArray(forKey: Self.recentBorrowersKey) ?? []
+        history.forEach(add)
+
+        let books = (try? viewContext.fetch(Book.fetchRequestAll())) ?? []
+        for book in visibleOnly(books) {
+            if let name = book.borrowerName { add(name) }
+        }
+
+        return Array(ordered.prefix(Self.recentBorrowersLimit))
+    }
+
+    /// Pushes a borrower name to the front of the device-local history (deduped
+    /// case-insensitively, capped). No-op for blank names. The on-book `borrower`
+    /// attribute is the synced source of truth; this list is only a local convenience.
+    func recordBorrower(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var history = UserDefaults.standard.stringArray(forKey: Self.recentBorrowersKey) ?? []
+        history.removeAll { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        history.insert(trimmed, at: 0)
+        UserDefaults.standard.set(Array(history.prefix(Self.recentBorrowersLimit)),
+                                  forKey: Self.recentBorrowersKey)
+    }
+
     // MARK: - Mutations
 
     func delete(_ object: NSManagedObject) {

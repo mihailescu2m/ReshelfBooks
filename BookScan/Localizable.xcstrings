@@ -21,6 +21,16 @@
         }
       }
     },
+    "%@ by %@, lent to %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ by %2$@, lent to %3$@"
+          }
+        }
+      }
+    },
     "%@ by %@, on shelf %@" : {
       "localizations" : {
         "en" : {
@@ -174,6 +184,15 @@
     "Lend book" : {
 
     },
+    "Lend to %@" : {
+
+    },
+    "Lent %@" : {
+
+    },
+    "Lent to %@" : {
+
+    },
     "Look Up Book" : {
 
     },
@@ -181,6 +200,9 @@
 
     },
     "Move Into Shared Library" : {
+
+    },
+    "Name" : {
 
     },
     "Network error: %@" : {
@@ -228,10 +250,16 @@
     "Place this book on:" : {
 
     },
+    "Recent — tap to lend now" : {
+
+    },
     "Return" : {
 
     },
     "Return book" : {
+
+    },
+    "Returned from %@" : {
 
     },
     "Scan a book's barcode to return it" : {
@@ -291,10 +319,13 @@
     "This book has been returned to your library" : {
 
     },
-    "This book is lent. Use Return to move it back to its shelf." : {
+    "This book is lent" : {
 
     },
     "Unshelved" : {
+
+    },
+    "Use Return to move it back to its shelf." : {
 
     },
     "We couldn't find any cover images for this book." : {

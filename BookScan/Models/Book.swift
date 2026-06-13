@@ -22,6 +22,11 @@ public final class Book: NSManagedObject {
     /// nil for books created directly. Lets that user take these books back when
     /// leaving the share. Never shown in the UI.
     @NSManaged public var contributedBy: String?
+    /// Who the book is currently lent to (nil/empty = an anonymous lend). Set in
+    /// `lend(to:borrower:)`, cleared in `returnBook()`.
+    @NSManaged public var borrower: String?
+    /// When the book was lent. Set in `lend(to:borrower:)`, cleared in `returnBook()`.
+    @NSManaged public var dateLent: Date?
 
     // CloudKit requires every relationship to be optional and have an inverse.
     @NSManaged public var library: Library?
@@ -40,21 +45,36 @@ public final class Book: NSManagedObject {
         shelf?.isLendingShelf ?? false
     }
 
+    /// The borrower's name if one was recorded and non-blank, else nil. Use this for
+    /// display so an empty-string borrower reads the same as an anonymous lend.
+    public var borrowerName: String? {
+        guard let name = borrower?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        return name
+    }
+
     // MARK: - Lending Actions
 
     /// Lends the book by moving it to the lending shelf, remembering its current
-    /// shelf so it can be returned later. No-op if `lendingShelf` isn't a lending shelf.
-    func lend(to lendingShelf: Shelf) {
+    /// shelf so it can be returned later. Records an optional borrower name (blank
+    /// is treated as anonymous) and the lend date. No-op if `lendingShelf` isn't a
+    /// lending shelf.
+    func lend(to lendingShelf: Shelf, borrower: String? = nil) {
         guard lendingShelf.isLendingShelf else { return }
         previousShelf = shelf
         shelf = lendingShelf
+        let trimmed = borrower?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.borrower = (trimmed?.isEmpty == false) ? trimmed : nil
+        dateLent = Date()
     }
 
     /// Returns the book to its original shelf (or unshelved if none) and clears the
-    /// remembered previous shelf.
+    /// remembered previous shelf and lending details.
     func returnBook() {
         shelf = previousShelf
         previousShelf = nil
+        borrower = nil
+        dateLent = nil
     }
 }
 

@@ -53,7 +53,12 @@ extension PersistenceController {
             attribute("dateAdded", .dateAttributeType, optional: true),
             // Join-time contribution tag (see Book.contributedBy). NOTE: new fields
             // must be deployed to the Production CloudKit schema before release.
-            attribute("contributedBy", .stringAttributeType, optional: true)
+            attribute("contributedBy", .stringAttributeType, optional: true),
+            // Lending: who the book is currently lent to, and when. Both set in
+            // lend(to:borrower:) and cleared in returnBook(). NOTE: same Production
+            // CloudKit schema deploy requirement as contributedBy above.
+            attribute("borrower", .stringAttributeType, optional: true),
+            attribute("dateLent", .dateAttributeType, optional: true)
         ]
 
         // MARK: Relationships (created in pairs, then linked as inverses)

@@ -294,7 +294,9 @@ struct LendingShelfSectionView: View {
                 .foregroundColor(.secondary)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 16) {
+                // Top-aligned so covers line up even when some lent cards carry a
+                // borrower line (named lends) and others don't (anonymous lends).
+                LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(sortedBooks) { book in
                         BookCardView(book: book) {
                             onBookTap(book)
@@ -390,6 +392,9 @@ struct BookCardView: View {
     @ObservedObject var book: Book
     let onTap: () -> Void
 
+    /// Borrower name to read out, only when the book is actually lent.
+    private var lentBorrower: String? { book.isLent ? book.borrowerName : nil }
+
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 8) {
@@ -409,13 +414,29 @@ struct BookCardView: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+
+                    // Lent books show who has them. Render the row for every lent book
+                    // (placeholder, hidden via opacity) so named and anonymous lends keep
+                    // the same card height and the row stays aligned.
+                    if book.isLent {
+                        HStack(spacing: 3) {
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 9))
+                            Text(book.borrowerName ?? "—")
+                                .lineLimit(1)
+                        }
+                        .font(.caption2)
+                        .foregroundColor(.accentColor)
+                        .opacity(book.borrowerName == nil ? 0 : 1)
+                    }
                 }
                 .frame(width: 100, alignment: .leading)
             }
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(book.title) by \(book.author)")
+        .accessibilityLabel(lentBorrower.map { "\(book.title) by \(book.author), lent to \($0)" }
+                            ?? "\(book.title) by \(book.author)")
         .accessibilityHint("Double tap to view details")
     }
 }
