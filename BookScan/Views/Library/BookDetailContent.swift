@@ -526,7 +526,8 @@ private struct SheetMetrics: DynamicProperty {
     static let headerSpacing: CGFloat = 8    // title ↔ message
     static let outerSpacing: CGFloat = 12    // between header and each button
 
-    @ScaledMetric(relativeTo: .headline) var titleHeight: CGFloat = 22
+    // .title3 matches the main sheet headers (SheetHeaderBar); the height tracks it.
+    @ScaledMetric(relativeTo: .title3) var titleHeight: CGFloat = 26
     @ScaledMetric(relativeTo: .subheadline) var messageHeight: CGFloat = 20
     @ScaledMetric(relativeTo: .body) var buttonHeight: CGFloat = 50
 
@@ -541,7 +542,7 @@ private struct SheetMetrics: DynamicProperty {
     func header(title: String, message: String) -> some View {
         VStack(spacing: Self.headerSpacing) {
             Text(title)
-                .font(.headline)
+                .font(.title3.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .frame(height: titleHeight)
@@ -637,11 +638,14 @@ private struct CoverSourceSheet: View {
         VStack(spacing: SheetMetrics.outerSpacing) {
             metrics.header(title: "Change Cover Image", message: "Select image source from below.")
 
-            metrics.pillButton("Take Photo", fill: .accentColor, weight: .semibold) { onSelect(.camera) }
-            metrics.pillButton("Choose from Library", fill: .accentColor, weight: .semibold) { onSelect(.library) }
-            metrics.pillButton("Search the Web", fill: .accentColor, weight: .semibold) { onSelect(.web) }
+            // Match the Book Details action-row buttons: faint tinted fill with
+            // colored text — blue (like Lend) for the source options, red (like
+            // Delete) for Remove Cover.
+            metrics.pillButton("Take Photo", fill: .blue.opacity(0.1), foreground: .blue, weight: .regular) { onSelect(.camera) }
+            metrics.pillButton("Choose from Library", fill: .blue.opacity(0.1), foreground: .blue, weight: .regular) { onSelect(.library) }
+            metrics.pillButton("Search the Web", fill: .blue.opacity(0.1), foreground: .blue, weight: .regular) { onSelect(.web) }
             if hasCover {
-                metrics.pillButton("Remove Cover", fill: .red, weight: .semibold, role: .destructive) { onSelect(.remove) }
+                metrics.pillButton("Remove Cover", fill: .red.opacity(0.1), foreground: .red, weight: .regular, role: .destructive) { onSelect(.remove) }
             }
 
             // Cancel — neutral grey, matches ConfirmationSheet's Cancel.

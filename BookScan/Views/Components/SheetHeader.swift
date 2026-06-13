@@ -17,7 +17,8 @@ enum SheetStyle {
     /// Corner radius for large sheets and the floating header bar. Single source of
     /// truth so it can be tuned in one place.
     static let cornerRadius: CGFloat = 36
-    /// Height of the floating header bar's content (excluding the top safe area).
+    /// Height of the header bar's content (excluding the top safe area). Snug around
+    /// the 48pt circular buttons.
     static let headerHeight: CGFloat = 64
 }
 
@@ -29,12 +30,21 @@ enum SheetStyle {
 struct CircularIconButton: View {
     let systemName: String
     var prominent: Bool = false
+    /// Optical-centering nudge for glyphs whose bounding box isn't visually centered
+    /// (e.g. `square.and.arrow.up`, which otherwise sits low). Negative = up.
+    var glyphYOffset: CGFloat = 0
     var accessibilityLabel: String
     let action: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
 
-    private let diameter: CGFloat = 44
+    // A 48pt disc with a 20pt glyph. The plain fill is a TRANSLUCENT system fill, not
+    // an absolute gray: it darkens (light) / lightens (dark) whatever surface it sits
+    // on by a constant amount, so the disc reads with the same contrast on the white
+    // sheet background AND the light-gray tab header — an absolute gray (systemGray5)
+    // pops on white but blends into the gray header. (A material can't be used: it
+    // blurs to match a light background and the disc vanishes.)
+    private let diameter: CGFloat = 48
 
     var body: some View {
         Button(action: action) {
@@ -42,11 +52,12 @@ struct CircularIconButton: View {
                 if prominent {
                     Circle().fill(Color.accentColor)
                 } else {
-                    Circle().fill(.ultraThinMaterial)
+                    Circle().fill(Color(.tertiarySystemFill))
                 }
                 Image(systemName: systemName)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(prominent ? Color.white : Color.primary)
+                    .offset(y: glyphYOffset)
             }
             .frame(width: diameter, height: diameter)
             .opacity(isEnabled ? 1 : 0.4)
@@ -75,7 +86,7 @@ struct SheetHeaderBar<Leading: View, Trailing: View>: View {
     var body: some View {
         ZStack {
             Text(title)
-                .font(.title2.bold())
+                .font(.title3.weight(.semibold))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .padding(.horizontal, 56)   // keep the title clear of the edge buttons

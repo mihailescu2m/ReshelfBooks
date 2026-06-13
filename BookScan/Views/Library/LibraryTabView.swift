@@ -80,7 +80,7 @@ struct LibraryTabView: View {
             // Same surface as the page background, so the bar is seamless.
             background: AnyShapeStyle(Color(.secondarySystemBackground)),
             leading: {
-                CircularIconButton(systemName: "square.and.arrow.up", accessibilityLabel: "Share Library") {
+                CircularIconButton(systemName: "square.and.arrow.up", glyphYOffset: -2, accessibilityLabel: "Share Library") {
                     presentSharing()
                 }
             },

@@ -158,7 +158,9 @@ struct NewBookView: View {
                     .background(Color(.tertiarySystemBackground))
                     .cornerRadius(8)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140))], spacing: 12) {
+                // Same adaptive grid as BookDetailContent's Shelf Assignment, so the
+                // column count matches across both screens at the same width.
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260))], spacing: 8) {
                     ForEach(shelves.regularShelves) { shelf in
                         shelfButton(shelf)
                     }
