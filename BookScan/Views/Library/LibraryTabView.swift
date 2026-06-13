@@ -235,7 +235,7 @@ struct LibraryTabView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(unshelvedBooks.count) \(unshelvedBooks.count == 1 ? "book" : "books")")
+                Text("^[\(unshelvedBooks.count) book](inflect: true)")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -284,7 +284,7 @@ struct LendingShelfSectionView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(bookCount) \(bookCount == 1 ? "book" : "books")")
+                Text("^[\(bookCount) book](inflect: true)")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -335,7 +335,7 @@ struct ShelfSectionView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
-                Text("\(bookCount) \(bookCount == 1 ? "book" : "books")")
+                Text("^[\(bookCount) book](inflect: true)")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
@@ -372,16 +372,16 @@ struct ShelfSectionView: View {
                 }
             }
         }
-        .confirmationDialog(
-            "Delete Shelf",
-            isPresented: $showingDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) {
+        .sheet(isPresented: $showingDeleteConfirmation) {
+            ConfirmationSheet(
+                title: "Delete Shelf",
+                message: "Books on this shelf will be moved to Unshelved.",
+                actionLabel: "Delete",
+                actionRole: .destructive,
+                bottomPadding: SheetMetrics.defaultBottomPadding
+            ) {
                 onDeleteShelf()
             }
-        } message: {
-            Text("Books on this shelf will be moved to Unshelved.")
         }
     }
 }

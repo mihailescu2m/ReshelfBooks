@@ -40,7 +40,8 @@ struct ContentView: View {
             Button("Keep My Books Private") { persistence.keepLocalDataAfterJoin() }
             Button("Move Into Shared Library") { persistence.moveLocalBooksIntoSharedLibrary() }
         } message: {
-            Text(joinPromptMessage)
+            // Inflection markup pluralizes "book" with the count and stays localizable.
+            Text("You have ^[\(persistence.pendingJoinLocalBookCount ?? 0) book](inflect: true) in your own library. Keep them private, or move them into the shared library?")
         }
         // Shown when a participant leaves a shared library they had moved books into:
         // bring those books back (with their current shelves) or leave them behind.
@@ -51,7 +52,7 @@ struct ContentView: View {
             Button("Bring Them Back") { persistence.restoreContributedBooks() }
             Button("Leave Them", role: .destructive) { persistence.discardLeaveSnapshot() }
         } message: {
-            Text(leavePromptMessage)
+            Text("You brought ^[\(persistence.pendingLeaveSnapshot?.count ?? 0) book](inflect: true) into the shared library. Bring them back to your library?")
         }
         // Shown when a share invitation is declined because the user already owns a
         // shared library of their own.
@@ -63,20 +64,6 @@ struct ContentView: View {
         } message: {
             Text(persistence.joinBlockedReason ?? "")
         }
-    }
-
-    private var joinPromptMessage: String {
-        let count = persistence.pendingJoinLocalBookCount ?? 0
-        let books = count == 1 ? "book" : "books"
-        return "You have \(count) \(books) in your own library. "
-            + "Keep them private, or move them into the shared library?"
-    }
-
-    private var leavePromptMessage: String {
-        let count = persistence.pendingLeaveSnapshot?.count ?? 0
-        let books = count == 1 ? "book" : "books"
-        return "You brought \(count) \(books) into the shared library. "
-            + "Bring them back to your library?"
     }
 
     private var floatingTabBar: some View {

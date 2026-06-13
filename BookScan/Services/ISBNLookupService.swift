@@ -36,13 +36,13 @@ enum ISBNLookupError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .networkError(let error):
-            return "Network error: \(error.localizedDescription)"
+            return String(localized: "Network error: \(error.localizedDescription)")
         case .notFound:
-            return "Book not found"
+            return String(localized: "Book not found")
         case .invalidResponse:
-            return "Invalid response from server"
+            return String(localized: "Invalid response from server")
         case .decodingError:
-            return "Could not parse book data"
+            return String(localized: "Could not parse book data")
         }
     }
 }

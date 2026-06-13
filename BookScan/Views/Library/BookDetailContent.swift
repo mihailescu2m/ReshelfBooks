@@ -229,7 +229,7 @@ struct BookDetailContent: View {
                 Spacer()
                 if let shelf = shelf {
                     let count = shelf.books?.count ?? 0
-                    Text("\(count) \(count == 1 ? "book" : "books")")
+                    Text("^[\(count) book](inflect: true)")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -312,30 +312,8 @@ struct BookDetailContent: View {
 
     // MARK: - Actions
 
-    private var isIPad: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
-    }
-
-    /// The active window's bottom safe-area inset — non-zero only on devices with a home
-    /// indicator (Face-ID iPhones).
-    private var bottomSafeInset: CGFloat {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow }?
-            .safeAreaInsets.bottom ?? 0
-    }
-
-    /// Bottom padding for the half-sheets:
-    /// - iPad: a centered card with no home indicator, so it needs real bottom padding to
-    ///   balance the top and keep the last pill clear of the rounded corner.
-    /// - Face-ID iPhone: the system already reserves the home-indicator strip below the
-    ///   sheet, so adding our own padding would just make the bottom look heavier — use 0.
-    /// - Touch-ID iPhone (no home indicator): a small fixed pad so the pill isn't flush.
-    private var sheetBottomPadding: CGFloat {
-        if isIPad { return 24 }
-        return bottomSafeInset > 0 ? 0 : 16
-    }
+    /// Bottom padding inside the half-sheets — shared device logic on SheetMetrics.
+    private var sheetBottomPadding: CGFloat { SheetMetrics.defaultBottomPadding }
 
     @ViewBuilder
     private func sheetContent(for sheet: BookDetailSheet) -> some View {
@@ -473,7 +451,7 @@ struct BookDetailContent: View {
 /// detent is computed from those exact heights, so the card fits the content with no slack.
 /// The earlier gap came from computing the detent from constants while letting the elements
 /// render at their smaller *natural* heights — here the elements are forced to match.
-private struct ConfirmationSheet: View {
+struct ConfirmationSheet: View {
     @Environment(\.dismiss) private var dismiss
     private let metrics = SheetMetrics()
 
@@ -514,6 +492,7 @@ private struct ConfirmationSheet: View {
         // 2 buttons: the action + Cancel.
         .presentationDetents([.height(metrics.height(buttonCount: 2, bottomPadding: bottomPadding))])
         .presentationCornerRadius(24)
+        .presentationBackground { Color(.systemBackground).ignoresSafeArea() }
         .presentationDragIndicator(.hidden)
     }
 }
@@ -529,10 +508,24 @@ private struct ConfirmationSheet: View {
 /// content; titles and messages are kept to one line (shrinking slightly if needed) so their
 /// height stays fixed and the math stays exact. Conforms to DynamicProperty so SwiftUI keeps
 /// the @ScaledMetric values updated even though this lives as a plain property of the sheet.
-private struct SheetMetrics: DynamicProperty {
+struct SheetMetrics: DynamicProperty {
     static let topPadding: CGFloat = 20      // space above the title
     static let headerSpacing: CGFloat = 8    // title ↔ message
     static let outerSpacing: CGFloat = 12    // between header and each button
+
+    /// Bottom padding for the half-sheets, by device — shared by every confirmation
+    /// half-sheet. iPad: a fixed pad balances the centered card. Face-ID iPhone: 0
+    /// (the system reserves the home-indicator strip). Touch-ID iPhone (no indicator):
+    /// a small pad so the last pill isn't flush.
+    static var defaultBottomPadding: CGFloat {
+        if UIDevice.current.userInterfaceIdiom == .pad { return 24 }
+        let bottomInset = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?
+            .safeAreaInsets.bottom ?? 0
+        return bottomInset > 0 ? 0 : 16
+    }
 
     // .title3 matches the main sheet headers (SheetHeaderBar); the height tracks it.
     @ScaledMetric(relativeTo: .title3) var titleHeight: CGFloat = 26
@@ -668,6 +661,7 @@ private struct CoverSourceSheet: View {
         .frame(maxWidth: .infinity)
         .presentationDetents([.height(metrics.height(buttonCount: buttonCount, bottomPadding: bottomPadding))])
         .presentationCornerRadius(24)
+        .presentationBackground { Color(.systemBackground).ignoresSafeArea() }
         .presentationDragIndicator(.hidden)
     }
 }

@@ -124,7 +124,11 @@ struct SearchView: View {
                 }
             }
             .padding(12)
-            .background(Color(.tertiarySystemBackground))
+            // Translucent fill (not tertiarySystemBackground): the search box sits
+            // directly on the sheet's systemBackground, and tertiarySystemBackground
+            // is white in light mode — invisible on the white sheet. A system fill
+            // contrasts in both light and dark.
+            .background(Color(.tertiarySystemFill))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .padding()
@@ -195,7 +199,7 @@ struct SearchView: View {
 
     private var searchResultsList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("\(filteredBooks.count) result\(filteredBooks.count == 1 ? "" : "s")")
+            Text("^[\(filteredBooks.count) result](inflect: true)")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .padding(.horizontal)

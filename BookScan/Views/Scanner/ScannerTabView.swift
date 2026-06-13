@@ -276,7 +276,7 @@ struct ScannerTabView: View {
         // it several times a second (haptic buzzing, banner flicker). The camera is
         // already stopped; the banner's ✕ runs resetScanner() and resumes cleanly.
         if isbn.count == 13 && !isbn.hasPrefix("978") && !isbn.hasPrefix("979") {
-            errorMessage = "This barcode isn't a book ISBN."
+            errorMessage = String(localized: "This barcode isn't a book ISBN.")
             scannedCode = nil
             return
         }

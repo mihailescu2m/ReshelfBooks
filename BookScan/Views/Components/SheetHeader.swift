@@ -24,9 +24,11 @@ enum SheetStyle {
 
 // MARK: - Circular icon button
 
-/// A circular icon button for sheet headers. The `prominent` variant fills with the
-/// accent color (the ✓ "Done" button); the plain variant uses a material fill (✕, ‹,
-/// and the action icons like share / add / reset).
+/// A circular icon button for sheet headers, built on the native bordered button
+/// styles so it gets the system press animation, border, and (on iOS 26) Liquid-Glass
+/// treatment for free — matching the share-sheet's circular buttons. The `prominent`
+/// variant is the filled accent circle (✓ "Done"); the plain variant is the neutral
+/// circle (✕, ‹, share / add / reset). Disabled dimming is handled by the style.
 struct CircularIconButton: View {
     let systemName: String
     var prominent: Bool = false
@@ -36,34 +38,35 @@ struct CircularIconButton: View {
     var accessibilityLabel: String
     let action: () -> Void
 
-    @Environment(\.isEnabled) private var isEnabled
-
-    // A 48pt disc with a 20pt glyph. The plain fill is a TRANSLUCENT system fill, not
-    // an absolute gray: it darkens (light) / lightens (dark) whatever surface it sits
-    // on by a constant amount, so the disc reads with the same contrast on the white
-    // sheet background AND the light-gray tab header — an absolute gray (systemGray5)
-    // pops on white but blends into the gray header. (A material can't be used: it
-    // blurs to match a light background and the disc vanishes.)
-    private let diameter: CGFloat = 48
-
     var body: some View {
-        Button(action: action) {
-            ZStack {
-                if prominent {
-                    Circle().fill(Color.accentColor)
-                } else {
-                    Circle().fill(Color(.tertiarySystemFill))
-                }
-                Image(systemName: systemName)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(prominent ? Color.white : Color.primary)
-                    .offset(y: glyphYOffset)
+        Group {
+            if prominent {
+                Button(action: action) { glyph }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.accentColor)
+            } else {
+                Button(action: action) { glyph }
+                    .buttonStyle(.bordered)
+                    // Neutral (gray) circle with a primary-colored glyph, like the
+                    // system close button — primary tint gives a translucent gray fill
+                    // that adapts to light/dark, with a primary-colored symbol.
+                    .tint(.primary)
             }
-            .frame(width: diameter, height: diameter)
-            .opacity(isEnabled ? 1 : 0.4)
         }
-        .buttonStyle(.plain)
+        .buttonBorderShape(.circle)
+        .controlSize(.regular)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var glyph: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 23, weight: .semibold))
+            .offset(y: glyphYOffset)
+            // Uniform square label box, sized (with .controlSize(.regular) padding) so
+            // the circle lands near the ~48pt of the system share-sheet buttons. It
+            // also keeps every button the same circle regardless of glyph bounding box
+            // (square.and.arrow.up is taller than plus).
+            .frame(width: 32, height: 32)
     }
 }
 
@@ -167,6 +170,8 @@ extension View {
     func standardSheetPresentation() -> some View {
         self
             .presentationCornerRadius(SheetStyle.cornerRadius)
-            .presentationBackground(Color(.systemBackground))
+            // ignoresSafeArea so the opaque fill reaches the bottom edge (the plain
+            // ShapeStyle form leaves the home-indicator strip uncovered).
+            .presentationBackground { Color(.systemBackground).ignoresSafeArea() }
     }
 }

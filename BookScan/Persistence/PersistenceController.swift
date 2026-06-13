@@ -647,7 +647,7 @@ final class PersistenceController: ObservableObject {
         // We simply don't import the share and explain why.
         if ownsActivelySharedLibrary() {
             DispatchQueue.main.async { [weak self] in
-                self?.joinBlockedReason = "You're already sharing your own library. Stop sharing it before joining another library."
+                self?.joinBlockedReason = String(localized: "You're already sharing your own library. Stop sharing it before joining another library.")
             }
             return
         }

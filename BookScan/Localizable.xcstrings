@@ -1,0 +1,317 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@ by %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ by %2$@"
+          }
+        }
+      }
+    },
+    "%@ by %@, %@%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ by %2$@, %3$@%4$@"
+          }
+        }
+      }
+    },
+    "%@ by %@, on shelf %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ by %2$@, on shelf %3$@"
+          }
+        }
+      }
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "%lld" : {
+
+    },
+    "^[%lld book](inflect: true)" : {
+
+    },
+    "^[%lld result](inflect: true)" : {
+
+    },
+    "978-0-14-143951-8" : {
+
+    },
+    "Add to Library" : {
+
+    },
+    "Book Found" : {
+
+    },
+    "Book not found" : {
+
+    },
+    "Book Returned" : {
+
+    },
+    "Bring Them Back" : {
+
+    },
+    "Can't Join Library" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Cannot Lend Book" : {
+
+    },
+    "Clear search" : {
+
+    },
+    "Could not parse book data" : {
+
+    },
+    "Couldn't find details for this ISBN." : {
+
+    },
+    "Create" : {
+
+    },
+    "Create a Shelf" : {
+
+    },
+    "Delete" : {
+
+    },
+    "Delete book" : {
+
+    },
+    "Delete Shelf" : {
+
+    },
+    "Done" : {
+
+    },
+    "Double tap to delete this book permanently" : {
+
+    },
+    "Double tap to mark this book as lent" : {
+
+    },
+    "Double tap to return this book to its original shelf" : {
+
+    },
+    "Double tap to select this shelf" : {
+
+    },
+    "Double tap to use these details" : {
+
+    },
+    "Double tap to view details" : {
+
+    },
+    "Enter a name for the new shelf" : {
+
+    },
+    "Enter a valid 10 or 13 digit ISBN" : {
+
+    },
+    "Enter ISBN" : {
+
+    },
+    "Enter title, author, or ISBN to search" : {
+
+    },
+    "Family sharing needs iCloud. Make sure you're signed into iCloud in Settings, then try again." : {
+
+    },
+    "Find books by title, author, or ISBN" : {
+
+    },
+    "Invalid response from server" : {
+
+    },
+    "ISBN: %@" : {
+
+    },
+    "Joined Shared Library" : {
+
+    },
+    "Keep My Books Private" : {
+
+    },
+    "Leave Them" : {
+
+    },
+    "Left Shared Library" : {
+
+    },
+    "Lend" : {
+
+    },
+    "Lend book" : {
+
+    },
+    "Look Up Book" : {
+
+    },
+    "Looking up book..." : {
+
+    },
+    "Move Into Shared Library" : {
+
+    },
+    "Network error: %@" : {
+
+    },
+    "New Shelf" : {
+
+    },
+    "No books found matching \"%@\"" : {
+
+    },
+    "No books on this shelf" : {
+
+    },
+    "No Books Yet" : {
+
+    },
+    "No Cover Images Found" : {
+
+    },
+    "No Details Found" : {
+
+    },
+    "No Results" : {
+
+    },
+    "No results found for %@" : {
+
+    },
+    "No shelf assigned" : {
+
+    },
+    "No shelves available. Create one to organize this book." : {
+
+    },
+    "No shelves yet. Create one to organize your books." : {
+
+    },
+    "Not the right book? Enter ISBN manually" : {
+
+    },
+    "OK" : {
+
+    },
+    "Place this book on:" : {
+
+    },
+    "Return" : {
+
+    },
+    "Return book" : {
+
+    },
+    "Scan a book's barcode to return it" : {
+
+    },
+    "Scan book barcodes to add them to your library" : {
+
+    },
+    "Search by title, author, or ISBN..." : {
+
+    },
+    "Search field" : {
+
+    },
+    "Search Your Library" : {
+
+    },
+    "Search your library by title, author, or ISBN" : {
+
+    },
+    "Searching book catalogs..." : {
+
+    },
+    "Searching for cover images..." : {
+
+    },
+    "Select a cover image" : {
+
+    },
+    "Select Shelf" : {
+
+    },
+    "Select the correct details for ISBN %@" : {
+
+    },
+    "Sharing Unavailable" : {
+
+    },
+    "Shelf Assignment" : {
+
+    },
+    "Shelf name" : {
+
+    },
+    "Tap camera to change cover, pencil to edit details" : {
+
+    },
+    "Tap to keep open" : {
+
+    },
+    "The lending shelf is not available right now. Please try again." : {
+
+    },
+    "This barcode isn't a book ISBN." : {
+
+    },
+    "This book has been returned to your library" : {
+
+    },
+    "This book is lent. Use Return to move it back to its shelf." : {
+
+    },
+    "Unshelved" : {
+
+    },
+    "We couldn't find any cover images for this book." : {
+
+    },
+    "Where to find the ISBN:" : {
+
+    },
+    "You brought ^[%lld book](inflect: true) into the shared library. Bring them back to your library?" : {
+
+    },
+    "You have ^[%lld book](inflect: true) in your own library. Keep them private, or move them into the shared library?" : {
+
+    },
+    "You're already sharing your own library. Stop sharing it before joining another library." : {
+
+    }
+  },
+  "version" : "1.0"
+}
