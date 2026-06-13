@@ -208,6 +208,7 @@ BookScan uses the following free, open APIs — no API keys required (except Tro
 | [Library of Congress](https://www.loc.gov/apis/) | Book metadata (5th) — niche US-published, regional, children's, cookbooks, official publications |
 | [Trove (National Library of Australia)](https://trove.nla.gov.au/about/create-something/using-api) | Book metadata (6th) — Australian-published books. Needs a free API key (renewed yearly), pasted into iOS Settings → BookScan |
 | [Inventaire](https://api.inventaire.io/) | Book metadata (7th) + cover images — Wikidata-federated community database; multilingual European editions (incl. Romanian) |
+| [Apple Books (iTunes Search)](https://performance-partners.apple.com/search-api) | Cover images by title + author — strong coverage of mainstream commercial titles |
 | [WorldCat / OCLC](https://www.worldcat.org) | Cover images by ISBN — excellent coverage of academic, older, and non-English titles |
 | [Bookcover API](https://bookcover.longitood.com) | Cover images by ISBN |
 | [Better World Books](https://www.betterworldbooks.com) | Cover images by ISBN |

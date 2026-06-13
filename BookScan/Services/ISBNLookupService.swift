@@ -238,10 +238,11 @@ actor ISBNLookupService {
         // Kick off every source concurrently so the slow per-source network calls
         // (including HEAD validation) overlap instead of running back-to-back.
         async let openLibraryByISBN = getOpenLibraryCoverURL(isbn: isbn)
-        async let googleByISBN = searchGoogleBooks(query: "isbn:\(isbn)", maxResults: 1)
+        async let googleByISBN = getGoogleBooksCoverURL(isbn: isbn)
         async let googleByTitleAuthor = searchGoogleBooks(query: "\(title) \(author)", maxResults: 2)
         async let googleByTitle = searchGoogleBooks(query: title, maxResults: maxResults)
         async let openLibraryBySearch = searchOpenLibrary(title: title, author: author, maxResults: maxResults)
+        async let itunesByTitleAuthor = getITunesCoverURL(title: title, author: author)
         async let bookcoverByISBN = getBookcoverAPIURL(isbn: isbn)
         async let betterWorldByISBN = getBetterWorldBooksURL(isbn: isbn)
         async let worldcatByISBN = getWorldCatCoverURL(isbn: isbn)
@@ -255,10 +256,11 @@ actor ISBNLookupService {
 
         // Assemble in priority order: ISBN matches first, then title/author, then broader fallbacks.
         if let url = await openLibraryByISBN { append([url]) }
-        append(await googleByISBN)
+        if let url = await googleByISBN { append([url]) }
         append(await googleByTitleAuthor)
         append(await googleByTitle)
         append(await openLibraryBySearch)
+        if let url = await itunesByTitleAuthor { append([url]) }
         if let url = await bookcoverByISBN { append([url]) }
         if let url = await betterWorldByISBN { append([url]) }
         if let url = await worldcatByISBN { append([url]) }
@@ -317,7 +319,7 @@ actor ISBNLookupService {
     func findCoverURLByISBN(isbn: String) async -> String? {
         await firstNonNil([
             { await self.getOpenLibraryCoverURL(isbn: $0) },
-            { await self.searchGoogleBooks(query: "isbn:\($0)", maxResults: 1).first },
+            { await self.getGoogleBooksCoverURL(isbn: $0) },
             { await self.getWorldCatCoverURL(isbn: $0) },
             { await self.getBookcoverAPIURL(isbn: $0) },
             { await self.getBetterWorldBooksURL(isbn: $0) }
@@ -328,6 +330,9 @@ actor ISBNLookupService {
     /// when neither the metadata source nor any ISBN-keyed source had a cover.
     func findCoverURL(title: String, author: String) async -> String? {
         if let url = await searchGoogleBooks(query: "\(title) \(author)", maxResults: 1).first {
+            return url
+        }
+        if let url = await getITunesCoverURL(title: title, author: author) {
             return url
         }
         return await searchOpenLibrary(title: title, author: author, maxResults: 1).first
@@ -451,13 +456,26 @@ actor ISBNLookupService {
             return nil
         }
 
-        let imageURL = imageLinks["large"] as? String
+        // Prefer the largest tier available. `extraLarge`/`large` only appear in the
+        // single-volume detail response (see getGoogleBooksCoverURL); search results
+        // carry just thumbnail/smallThumbnail, which we clean up below.
+        let imageURL = imageLinks["extraLarge"] as? String
+            ?? imageLinks["large"] as? String
             ?? imageLinks["medium"] as? String
             ?? imageLinks["small"] as? String
             ?? imageLinks["thumbnail"] as? String
             ?? imageLinks["smallThumbnail"] as? String
 
-        return imageURL?.replacingOccurrences(of: "http://", with: "https://")
+        return imageURL.map(Self.cleanGoogleBooksImageURL)
+    }
+
+    /// Normalizes a Google Books image URL: HTTPS, and drops the `edge=curl` flag
+    /// that renders an ugly page-curl effect on the thumbnail. (We deliberately do
+    /// not touch the `zoom` parameter — its behaviour varies by volume and a wrong
+    /// value silently yields a broken image.)
+    private static func cleanGoogleBooksImageURL(_ url: String) -> String {
+        url.replacingOccurrences(of: "http://", with: "https://")
+           .replacingOccurrences(of: "&edge=curl", with: "")
     }
 
     // MARK: - Crossref API
@@ -726,6 +744,47 @@ actor ISBNLookupService {
         }
 
         return nil
+    }
+
+    // MARK: - iTunes / Apple Books
+
+    /// Cover artwork from the iTunes Search API (Apple Books). Free, no key. The API
+    /// is a text search, so the query is title + author; artwork comes back at 100px
+    /// and the URL is upscaled to 600px by swapping the size token. Strong coverage
+    /// of mainstream commercial titles.
+    private func getITunesCoverURL(title: String, author: String) async -> String? {
+        guard let urlString = Self.queryURLString(
+            base: "https://itunes.apple.com/search",
+            items: [("term", "\(title) \(author)"), ("media", "ebook"), ("limit", "1")]
+        ),
+        let json = try? await fetchJSON(urlString),
+        let results = json["results"] as? [[String: Any]],
+        let artwork = results.first?["artworkUrl100"] as? String else {
+            return nil
+        }
+        // Artwork URLs end in ".../100x100bb.jpg"; request a larger render.
+        return artwork.replacingOccurrences(of: "100x100bb", with: "600x600bb")
+    }
+
+    // MARK: - Google Books cover (volume detail)
+
+    /// Highest-resolution Google Books cover for an ISBN. The volumes SEARCH response
+    /// only carries thumbnail/smallThumbnail; the single-volume DETAIL response adds
+    /// small/medium/large/extraLarge when the publisher supplied them — so this does
+    /// the two-step (search for the volume id, then fetch its detail) to reach those
+    /// larger images. Falls back to the cleaned thumbnail.
+    private func getGoogleBooksCoverURL(isbn: String) async -> String? {
+        guard let search = try? await fetchJSON("https://www.googleapis.com/books/v1/volumes?q=isbn:\(isbn)"),
+              let items = search["items"] as? [[String: Any]],
+              let volumeID = items.first?["id"] as? String else {
+            return nil
+        }
+        guard let detail = try? await fetchJSON("https://www.googleapis.com/books/v1/volumes/\(volumeID)"),
+              let volumeInfo = detail["volumeInfo"] as? [String: Any] else {
+            // Detail fetch failed — use the cleaned thumbnail from the search hit.
+            return extractCoverURL(from: items[0])
+        }
+        return extractCoverURL(from: ["volumeInfo": volumeInfo])
     }
 
     // MARK: - Trove (National Library of Australia)
