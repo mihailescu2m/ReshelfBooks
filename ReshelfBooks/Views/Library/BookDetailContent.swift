@@ -56,6 +56,8 @@ struct BookDetailContent: View {
         .dismissWhenDeleted(book)
         .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
             book.shelf = newShelf
+            // Land at the end of the new shelf's manual order (matches the shelf picker).
+            book.sortOrder = persistence.nextSortOrder(in: newShelf, excluding: book)
         }
         .alert("Cannot Lend Book", isPresented: $showingLendingShelfMissingAlert) {
             Button("OK", role: .cancel) {}

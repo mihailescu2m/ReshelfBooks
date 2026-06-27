@@ -348,11 +348,16 @@ struct ShelfSectionView: View {
     private func syncOrderFromShelf() { orderedBooks = sortedBooks }
 
     /// Persist the dragged order: assign each book its index as `sortOrder`, then save.
+    /// Skips any book a concurrent CloudKit sync deleted mid-drag (writing `sortOrder` to a
+    /// deleted/faulted object would throw), and only saves when something actually moved.
     private func commitOrder() {
-        for (index, book) in orderedBooks.enumerated() where book.sortOrder != Int64(index) {
+        var changed = false
+        for (index, book) in orderedBooks.enumerated()
+        where !book.isDeleted && book.managedObjectContext != nil && book.sortOrder != Int64(index) {
             book.sortOrder = Int64(index)
+            changed = true
         }
-        persistence.save()
+        if changed { persistence.save() }
         draggingBook = nil
     }
 
@@ -402,6 +407,13 @@ struct ShelfSectionView: View {
                             // preview (10% larger) follows the finger. Leaving the original
                             // at full opacity means there is no lifted state that can get
                             // "stuck" when a drag is released outside any drop target.
+                            //
+                            // `draggingBook` is set unconditionally here (not guarded by
+                            // `== nil`): SwiftUI may re-invoke this closure for the dragged
+                            // card during a drag, which only re-sets it to the same book
+                            // (harmless). Unconditional assignment is also what lets the
+                            // *next* drag overwrite a value left stale by a release outside
+                            // every drop target — a `== nil` guard would break that recovery.
                             .onDrag {
                                 draggingBook = book
                                 return NSItemProvider(object: book.isbn as NSString)
@@ -420,9 +432,12 @@ struct ShelfSectionView: View {
                 }
                 // Catch-all: a release on empty row space (not on a card) still commits the
                 // current order, so a reorder finished in a gap isn't reverted on next sync.
-                .onDrop(of: [.text], delegate: ShelfDropResetDelegate(dragging: $draggingBook, onCommit: commitOrder))
+                .onDrop(of: [.text], delegate: ShelfDropResetDelegate(onCommit: commitOrder))
                 .onAppear { syncOrderFromShelf() }
-                .onChange(of: shelf.bookList.map(\.objectID)) { _, _ in
+                // Keyed on a Set, not the Array: `bookList` comes from an unordered Core Data
+                // relationship, so the Array's order can shuffle between renders and fire this
+                // spuriously. A Set reacts only to real adds/removes.
+                .onChange(of: Set(shelf.bookList.map(\.objectID))) { _, _ in
                     // Re-sync on add / remove / sync — but never disturb an in-progress drag.
                     if draggingBook == nil { syncOrderFromShelf() }
                 }
@@ -472,7 +487,6 @@ private struct BookReorderDropDelegate: DropDelegate {
 /// Row-level fallback: when a drag is released over empty shelf space (not on a card),
 /// the per-card delegates never fire, so this commits the current order.
 private struct ShelfDropResetDelegate: DropDelegate {
-    @Binding var dragging: Book?
     let onCommit: () -> Void
 
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
