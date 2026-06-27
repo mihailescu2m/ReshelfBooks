@@ -9,6 +9,31 @@ import SwiftUI
 import CoreData
 import UniformTypeIdentifiers
 
+extension UTType {
+    /// Private drag payload for reordering books within a shelf. Registered with
+    /// `.ownProcess` visibility so only in-app book drags match the shelf drop targets —
+    /// a text drag from another app can't trigger a reorder.
+    static let reshelfBook = UTType(exportedAs: "com.reshelfbooks.book")
+}
+
+/// Pure ordering step behind `commitOrder`, factored out so it can be unit-tested without
+/// a SwiftUI view: assigns each live book its array index as `sortOrder`.
+enum ShelfReorder {
+    /// Writes dense 0-based `sortOrder` values matching the array order. Skips books a
+    /// concurrent CloudKit sync deleted (writing to a deleted/faulted object would throw).
+    /// - Returns: `true` if any book's `sortOrder` actually changed.
+    @discardableResult
+    static func applyOrder(_ books: [Book]) -> Bool {
+        var changed = false
+        for (index, book) in books.enumerated()
+        where !book.isDeleted && book.managedObjectContext != nil && book.sortOrder != Int64(index) {
+            book.sortOrder = Int64(index)
+            changed = true
+        }
+        return changed
+    }
+}
+
 struct LibraryTabView: View {
     @EnvironmentObject private var persistence: PersistenceController
 
@@ -348,17 +373,34 @@ struct ShelfSectionView: View {
     private func syncOrderFromShelf() { orderedBooks = sortedBooks }
 
     /// Persist the dragged order: assign each book its index as `sortOrder`, then save.
-    /// Skips any book a concurrent CloudKit sync deleted mid-drag (writing `sortOrder` to a
-    /// deleted/faulted object would throw), and only saves when something actually moved.
     private func commitOrder() {
-        var changed = false
-        for (index, book) in orderedBooks.enumerated()
-        where !book.isDeleted && book.managedObjectContext != nil && book.sortOrder != Int64(index) {
-            book.sortOrder = Int64(index)
-            changed = true
-        }
-        if changed { persistence.save() }
+        if ShelfReorder.applyOrder(orderedBooks) { persistence.save() }
         draggingBook = nil
+    }
+
+    /// Drag payload for `book`, carrying its ISBN under the in-app-only `.reshelfBook`
+    /// type so external text drags can't match the shelf's drop targets.
+    private func bookDragProvider(for book: Book) -> NSItemProvider {
+        let provider = NSItemProvider()
+        let isbn = book.isbn
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.reshelfBook.identifier,
+                                            visibility: .ownProcess) { completion in
+            completion(Data(isbn.utf8), nil)
+            return nil
+        }
+        return provider
+    }
+
+    /// Move `book` to `index` in the working order and persist. Backs the VoiceOver
+    /// "Move left/right" actions, which are the accessible alternative to drag-to-reorder.
+    private func moveBook(_ book: Book, to index: Int) {
+        guard let from = orderedBooks.firstIndex(of: book),
+              index >= 0, index < orderedBooks.count, index != from else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            let moved = orderedBooks.remove(at: from)
+            orderedBooks.insert(moved, at: index)
+        }
+        commitOrder()
     }
 
     var body: some View {
@@ -416,23 +458,33 @@ struct ShelfSectionView: View {
                             // every drop target — a `== nil` guard would break that recovery.
                             .onDrag {
                                 draggingBook = book
-                                return NSItemProvider(object: book.isbn as NSString)
+                                return bookDragProvider(for: book)
                             } preview: {
                                 BookCardView(book: book, onTap: {})
                                     .frame(width: 100)
                                     .scaleEffect(1.1)
                             }
-                            .onDrop(of: [.text],
+                            .onDrop(of: [.reshelfBook],
                                     delegate: BookReorderDropDelegate(item: book,
                                                                       ordered: $orderedBooks,
                                                                       dragging: $draggingBook,
                                                                       onCommit: commitOrder))
+                            // Accessible alternative to drag-to-reorder for VoiceOver users.
+                            .accessibilityActions {
+                                let index = orderedBooks.firstIndex(of: book)
+                                if let index, index > 0 {
+                                    Button("Move left") { moveBook(book, to: index - 1) }
+                                }
+                                if let index, index < orderedBooks.count - 1 {
+                                    Button("Move right") { moveBook(book, to: index + 1) }
+                                }
+                            }
                         }
                     }
                 }
                 // Catch-all: a release on empty row space (not on a card) still commits the
                 // current order, so a reorder finished in a gap isn't reverted on next sync.
-                .onDrop(of: [.text], delegate: ShelfDropResetDelegate(onCommit: commitOrder))
+                .onDrop(of: [.reshelfBook], delegate: ShelfDropResetDelegate(onCommit: commitOrder))
                 .onAppear { syncOrderFromShelf() }
                 // Keyed on a Set, not the Array: `bookList` comes from an unordered Core Data
                 // relationship, so the Array's order can shuffle between renders and fire this

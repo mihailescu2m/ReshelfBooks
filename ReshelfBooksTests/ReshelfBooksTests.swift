@@ -506,6 +506,45 @@ struct ShelfReorderTests {
         mover.sortOrder = p.nextSortOrder(in: scifi, excluding: mover)
         #expect(mover.sortOrder == 2)   // appended after the two existing Sci-Fi books
     }
+
+    @Test("applyOrder writes dense indices matching the array order")
+    func applyOrderAssignsDenseIndices() {
+        let p = PersistenceController(inMemory: true)
+        let shelf = p.makeShelf(name: "Fiction")
+        let dune = p.makeBook(isbn: "9780441013593", title: "Dune", author: "Herbert", yearPublished: "1965", coverImageURL: nil, shelf: shelf)
+        let hobbit = p.makeBook(isbn: "9780547928227", title: "The Hobbit", author: "Tolkien", yearPublished: "1937", coverImageURL: nil, shelf: shelf)
+        let nineteen = p.makeBook(isbn: "9780451524935", title: "1984", author: "Orwell", yearPublished: "1949", coverImageURL: nil, shelf: shelf)
+
+        let changed = ShelfReorder.applyOrder([nineteen, hobbit, dune])   // reversed
+        #expect(changed)
+        #expect(nineteen.sortOrder == 0)
+        #expect(hobbit.sortOrder == 1)
+        #expect(dune.sortOrder == 2)
+    }
+
+    @Test("applyOrder returns false when the order is unchanged")
+    func applyOrderNoChangeReturnsFalse() {
+        let p = PersistenceController(inMemory: true)
+        let shelf = p.makeShelf(name: "Fiction")
+        let dune = p.makeBook(isbn: "9780441013593", title: "Dune", author: "Herbert", yearPublished: "1965", coverImageURL: nil, shelf: shelf)
+        let hobbit = p.makeBook(isbn: "9780547928227", title: "The Hobbit", author: "Tolkien", yearPublished: "1937", coverImageURL: nil, shelf: shelf)
+        #expect(ShelfReorder.applyOrder([dune, hobbit]) == false)   // already 0, 1
+    }
+
+    @Test("applyOrder skips a book deleted mid-drag without crashing")
+    func applyOrderSkipsDeletedBook() {
+        let p = PersistenceController(inMemory: true)
+        let shelf = p.makeShelf(name: "Fiction")
+        let dune = p.makeBook(isbn: "9780441013593", title: "Dune", author: "Herbert", yearPublished: "1965", coverImageURL: nil, shelf: shelf)
+        let hobbit = p.makeBook(isbn: "9780547928227", title: "The Hobbit", author: "Tolkien", yearPublished: "1937", coverImageURL: nil, shelf: shelf)
+
+        p.delete(hobbit)   // simulate a concurrent CloudKit deletion mid-drag
+
+        // hobbit (now deleted) is skipped; the surviving book is still reindexed.
+        let changed = ShelfReorder.applyOrder([hobbit, dune])
+        #expect(changed)
+        #expect(dune.sortOrder == 1)
+    }
 }
 
 // MARK: - Cover Image Tests
