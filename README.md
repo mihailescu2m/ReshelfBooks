@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="BookScan/Assets.xcassets/AppIcon.appiconset/BookScan_icon_1024_dark.png" width="160" alt="BookScan icon" />
+  <img src="ReshelfBooks/Assets.xcassets/AppIcon.appiconset/ReshelfBooks_icon_1024_dark.png" width="160" alt="Reshelf Books icon" />
 </p>
 
-<h1 align="center">BookScan</h1>
+<h1 align="center">Reshelf Books</h1>
 
 <p align="center">
   A native iOS app for scanning, organising, and lending your personal book collection — with iCloud sync across all your devices.
@@ -18,29 +18,33 @@
 
 ---
 
-## What is BookScan?
+## What is Reshelf Books?
 
-BookScan is the app that remembers every book's place on your library's shelves — so any book can find its way back with a single scan.
+Reshelf Books is the app that remembers every book's place on your library's shelves — so any book can find its way back with a single scan.
 
-Scan a book's barcode and the app instantly retrieves the title, author, year, and cover art. Assign the book to a named shelf — *"Living Room Top Row"*, *"Office Left"*, *"Kids Room"* — and BookScan remembers exactly where it lives. From that point on, any time a book ends up out of place, a single scan tells you where it belongs.
+Scan a book's barcode and the app instantly retrieves the title, author, year, and cover art. Assign the book to a named shelf — *"Living Room Top Row"*, *"Office Left"*, *"Kids Room"* — and Reshelf Books remembers exactly where it lives. From that point on, any time a book ends up out of place, a single scan tells you where it belongs.
 
 **The day-to-day usage:**
 
-📚 **Building your library** — Walk to your shelves once and scan everything in. Each book gets assigned to its shelf in the app, creating a complete map of your physical library. No typing, no manual entry.
+📷 **Building your library** — Walk to your shelves once and scan everything in. Each book gets assigned to its shelf in the app, creating a complete map of your physical library. No typing, no manual entry.
 
-📍 **Putting books back** — Pulled a book out and not sure where it came from? Scan the barcode. The app instantly shows you the exact shelf to return it to. No more wandering around trying to remember where it lives.
+📚 **Putting books back** — Pulled a book out and not sure where it came from? Scan the barcode. The app instantly shows you the exact shelf to return it to. No more wandering around trying to remember where it lives.
 
-🖥 **Always-on library assistant** — Leave an old iPad propped up on your bookshelf running BookScan full screen. It stays ready to scan at a moment's notice — no unlocking, no navigating. Just point and scan.
+📱 **Always-on library assistant** — Leave an old iPad propped up on your bookshelf running Reshelf Books full screen. It stays ready to scan at a moment's notice — no unlocking, no navigating. Just point and scan.
 
 👧 **When kids rearrange your shelves** — Children pull books out constantly and rarely put them back in the right place. A quick scan on each displaced book tells you exactly where it belongs, turning a frustrating re-sort into a two-second job.
 
-🤝 **Lending tracker** — Lend a book to someone with one tap. When they return it, scan the barcode: BookScan automatically clears the lent status and shows you which shelf to put it back on. If you can scan it, you have it back — it's that simple.
+🤲 **Lending tracker** — Lend a book to a friend with one tap. When they return it, scan the barcode: Reshelf Books automatically clears the lent status and shows you which shelf to put it back on. If you can scan it, you have it back — it's that simple.
+
+🏫 **Classroom libraries** — Catalog a class library once, lend books to students by name, and scan each return to send it straight back to the right shelf.
+
+🛒 **Never buy duplicates** — Spotted a book in a shop and not sure if you already own it? Scan the barcode and Reshelf Books tells you whether it's already on your shelves — and exactly where.
 
 ---
 
 ## Support the Project
 
-If BookScan saves you time or you just find it useful, a small donation is greatly appreciated and helps fund continued development.
+If Reshelf Books saves you time or you just find it useful, a small donation is greatly appreciated and helps fund continued development.
 
 [![Donate with PayPal](https://www.paypalobjects.com/en_AU/i/btn/btn_donate_LG.gif)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mihailescu2m%40gmail%2Ecom&lc=AU&item_name=memeka&item_number=odroid&currency_code=AUD&bn=PP%2DDonationsBF%3Abtn_donate_LG%2Egif%3ANonHosted)
 
@@ -59,6 +63,7 @@ If BookScan saves you time or you just find it useful, a small donation is great
 
 ### Library Management
 - **Named shelves** — organise books into as many shelves as you like; drag between shelves at any time
+- **Drag to reorder** — long-press a book on a shelf and drag it to a new position; the order is saved (regular shelves only — Lent and Unshelved stay auto-sorted)
 - **Unshelved section** — books without a shelf always stay visible and accessible
 - **Cover image editing** — change a cover from the camera, the photo library, or a web image search directly in the detail view
 - **Full-text search** — find any book instantly by title, author, or ISBN with a 300 ms debounced search
@@ -116,19 +121,19 @@ If BookScan saves you time or you just find it useful, a small donation is great
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/mihailescu2m/BookScan.git
-   cd BookScan/BookScan
+   git clone https://github.com/mihailescu2m/ReshelfBooks.git
+   cd ReshelfBooks
    ```
 
 2. **Open in Xcode**
    ```bash
-   open BookScan.xcodeproj
+   open ReshelfBooks.xcodeproj
    ```
 
 3. **Sign the app**  
    In Xcode → *Signing & Capabilities*, select your Apple Developer team. Xcode will register the App ID and the CloudKit container (`iCloud.memeka.BookScan`) automatically on first build.
 
-   > **CloudKit schema deployment:** debug builds use the *Development* CloudKit environment; TestFlight/App Store builds use *Production*, whose schema is locked. After adding or changing a model field (most recently `Book.contributedBy`), run a debug build once so the field appears in Development, then open the [CloudKit Console](https://icloud.developer.apple.com) → `iCloud.memeka.BookScan` → **Deploy Schema Changes to Production** before shipping — otherwise Production saves of that field will fail.
+   > **CloudKit schema deployment:** debug builds use the *Development* CloudKit environment; TestFlight/App Store builds use *Production*, whose schema is locked. After adding or changing a model field (most recently `Book.sortOrder`), run a debug build once so the field appears in Development, then open the [CloudKit Console](https://icloud.developer.apple.com) → `iCloud.memeka.BookScan` → **Deploy Schema Changes to Production** before shipping — otherwise Production saves of that field will fail.
 
 4. **Run on a device**  
    Select your iPhone or iPad as the run destination and press **⌘R**.  
@@ -137,8 +142,8 @@ If BookScan saves you time or you just find it useful, a small donation is great
 5. **Run unit tests**  
    ```bash
    xcodebuild build-for-testing \
-     -project BookScan.xcodeproj \
-     -scheme BookScan \
+     -project ReshelfBooks.xcodeproj \
+     -scheme ReshelfBooks \
      -destination 'generic/platform=iOS'
    ```
 
@@ -147,14 +152,14 @@ If BookScan saves you time or you just find it useful, a small donation is great
 ## Project Structure
 
 ```
-BookScan/
+ReshelfBooks/
 ├── Models/
 │   ├── Library.swift           — NSManagedObject: hidden root that owns shelves + books (sharing anchor)
-│   ├── Book.swift              — NSManagedObject: isbn, title, author, shelf, lend/return logic
+│   ├── Book.swift              — NSManagedObject: isbn, title, author, shelf, borrower, sortOrder, lend/return logic
 │   └── Shelf.swift             — NSManagedObject: name, sortOrder, isLendingShelf
 ├── Persistence/
 │   ├── PersistenceController.swift — Core Data + CloudKit stack, private/shared stores, factories, sharing
-│   └── BookScanModel.swift     — programmatic NSManagedObjectModel (CloudKit-compatible)
+│   └── ReshelfBooksModel.swift     — programmatic NSManagedObjectModel (CloudKit-compatible)
 ├── Services/
 │   ├── ISBNValidator.swift     — ISBN-10/13 normalisation & check-digit validation
 │   └── ISBNLookupService.swift — actor: metadata lookup + concurrent cover image search
@@ -181,7 +186,7 @@ BookScan/
 │       ├── ExistingBookView.swift       — Show location / return a found book
 │       └── ManualISBNEntryView.swift    — Keyboard ISBN entry with live validation
 ├── AppDelegate.swift   — Accepts CloudKit share invitations
-├── BookScanApp.swift   — App entry point, persistence injection, owner-only bootstrap
+├── ReshelfBooksApp.swift   — App entry point, persistence injection, owner-only bootstrap
 └── ContentView.swift   — TabView + floating tab bar + search sheet
 ```
 
@@ -198,14 +203,14 @@ Shelf   ──< Book (previousShelf)   ← remembers original shelf while lent
 
 A single hidden `Library` root owns every shelf and book; sharing that one object moves the whole graph into a shared CloudKit zone, so the entire library is shared (and new items automatically join it).
 
-`Book.lend(to:)` stores `shelf` → `previousShelf` and moves the book to the lending shelf.  
-`Book.returnBook()` restores `shelf = previousShelf` and clears `previousShelf`.
+`Book.lend(to:borrower:)` stores `shelf` → `previousShelf`, records the borrower and lend date, and moves the book to the lending shelf.  
+`Book.returnBook()` restores `shelf = previousShelf` and clears `previousShelf`, the borrower, and the lend date.
 
 ---
 
 ## API Credits
 
-BookScan uses the following free, open APIs — no API keys required (except Trove, optional):
+Reshelf Books uses the following free, open APIs — no API keys required (except Trove, optional):
 
 | Service | Used for |
 |---|---|
@@ -213,7 +218,7 @@ BookScan uses the following free, open APIs — no API keys required (except Tro
 | [Google Books API](https://developers.google.com/books) | Book metadata (2nd) + cover images (queried three ways: by ISBN, title+author, title) |
 | [Crossref](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) | Book metadata (4th) — academic, scientific, and university press titles |
 | [Library of Congress](https://www.loc.gov/apis/) | Book metadata (5th) — niche US-published, regional, children's, cookbooks, official publications |
-| [Trove (National Library of Australia)](https://trove.nla.gov.au/about/create-something/using-api) | Book metadata (6th) — Australian-published books. Needs a free API key (renewed yearly), pasted into iOS Settings → BookScan |
+| [Trove (National Library of Australia)](https://trove.nla.gov.au/about/create-something/using-api) | Book metadata (6th) — Australian-published books. Needs a free API key (renewed yearly), pasted into iOS Settings → Reshelf Books |
 | [Inventaire](https://api.inventaire.io/) | Book metadata (7th) + cover images — Wikidata-federated community database; multilingual European editions (incl. Romanian) |
 | [Apple Books (iTunes Search)](https://performance-partners.apple.com/search-api) | Cover images by title + author — strong coverage of mainstream commercial titles |
 | [WorldCat / OCLC](https://www.worldcat.org) | Cover images by ISBN — excellent coverage of academic, older, and non-English titles |
@@ -240,7 +245,7 @@ Please make sure existing tests pass and add new tests for any new logic.
 
 ## License
 
-BookScan is released under the [MIT License](LICENSE).
+Reshelf Books is released under the [MIT License](LICENSE).
 
 ```
 MIT License

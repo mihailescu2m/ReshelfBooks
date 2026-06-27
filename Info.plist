@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Book Scanner</string>
+	<string>Reshelf Books</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -36,9 +36,9 @@
 	<true/>
 
 	<key>NSCameraUsageDescription</key>
-	<string>BookScan needs camera access to scan book barcodes and take cover photos</string>
+	<string>Reshelf Books needs camera access to scan book barcodes and take cover photos</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>BookScan needs photo library access to select book cover images</string>
+	<string>Reshelf Books needs photo library access to select book cover images</string>
 
 	<key>UIApplicationSceneManifest</key>
 	<dict>

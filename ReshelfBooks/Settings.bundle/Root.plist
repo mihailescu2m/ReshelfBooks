@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PreferenceSpecifiers</key>
+	<array>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>Metadata Sources</string>
+			<key>FooterText</key>
+			<string>Optional: paste a free Trove API key (request one at trove.nla.gov.au) to improve lookups of Australian books. Leave empty to skip this source. Trove keys expire after 12 months and need renewing.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSTextFieldSpecifier</string>
+			<key>Title</key>
+			<string>Trove API Key</string>
+			<key>Key</key>
+			<string>trove_api_key</string>
+			<key>DefaultValue</key>
+			<string></string>
+			<key>IsSecure</key>
+			<false/>
+			<key>KeyboardType</key>
+			<string>Alphabet</string>
+			<key>AutocapitalizationType</key>
+			<string>None</string>
+			<key>AutocorrectionType</key>
+			<string>No</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSGroupSpecifier</string>
+			<key>Title</key>
+			<string>Reset</string>
+			<key>FooterText</key>
+			<string>Turn this on, then fully quit and reopen Reshelf Books. All books, shelves, and sharing will be permanently erased and the app will start fresh. This cannot be undone. For the iCloud copy to be erased too, be connected to the internet when you reopen the app.</string>
+		</dict>
+		<dict>
+			<key>Type</key>
+			<string>PSToggleSwitchSpecifier</string>
+			<key>Title</key>
+			<string>Erase All Data on Next Launch</string>
+			<key>Key</key>
+			<string>reset_all_data</string>
+			<key>DefaultValue</key>
+			<false/>
+		</dict>
+	</array>
+	<key>StringsTable</key>
+	<string>Root</string>
+</dict>
+</plist>

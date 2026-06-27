@@ -1,9 +1,0 @@
-/* Settings bundle strings (keys are the Title/FooterText values in Root.plist) */
-
-"Metadata Sources" = "Metadata Sources";
-"Optional: paste a free Trove API key (request one at trove.nla.gov.au) to improve lookups of Australian books. Leave empty to skip this source. Trove keys expire after 12 months and need renewing." = "Optional: paste a free Trove API key (request one at trove.nla.gov.au) to improve lookups of Australian books. Leave empty to skip this source. Trove keys expire after 12 months and need renewing.";
-"Trove API Key" = "Trove API Key";
-
-"Reset" = "Reset";
-"Turn this on, then fully quit and reopen BookScan. All books, shelves, and sharing will be permanently erased and the app will start fresh. This cannot be undone. For the iCloud copy to be erased too, be connected to the internet when you reopen the app." = "Turn this on, then fully quit and reopen BookScan. All books, shelves, and sharing will be permanently erased and the app will start fresh. This cannot be undone. For the iCloud copy to be erased too, be connected to the internet when you reopen the app.";
-"Erase All Data on Next Launch" = "Erase All Data on Next Launch";
