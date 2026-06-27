@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import AVFoundation
 
 /// All sheets the scanner can present. A single enum drives one `.sheet(item:)`,
 /// so SwiftUI never has two competing presentation state machines on the same view —
@@ -54,6 +55,11 @@ struct ScannerTabView: View {
 
     @State private var scannedCode: String?
     @State private var isScanning = true
+    /// Which camera to scan with. Defaults to the rear camera on iPhone and the front
+    /// camera on iPad (where the rear camera is awkward to aim at a shelf); the header
+    /// button flips between them.
+    @State private var cameraPosition: AVCaptureDevice.Position =
+        UIDevice.current.userInterfaceIdiom == .pad ? .front : .back
     @State private var activeSheet: ScannerSheet?
     @State private var pendingAction: PendingScannerAction?
     @State private var isLoading = false
@@ -79,7 +85,8 @@ struct ScannerTabView: View {
                 isScanning: Binding(
                     get: { isTabActive && isScanning },
                     set: { isScanning = $0 }
-                )
+                ),
+                cameraPosition: $cameraPosition
             )
             .ignoresSafeArea()
 
@@ -118,12 +125,12 @@ struct ScannerTabView: View {
     /// Floating header overlaid on the camera (replaces the old nav-bar toolbar).
     /// Same translucent bar as every sheet — the camera feed blurs through it.
     private var header: some View {
-        // Opaque, same surface as the Library header, so the two tabs match.
+        // Matches the Library header surface: opaque secondarySystemBackground on
+        // iOS 18–25, translucent glass on iOS 26 (handled by SheetHeaderBar).
         SheetHeaderBar(title: "Scan Book", background: AnyShapeStyle(Color(.secondarySystemBackground)), trailing: {
-            CircularIconButton(systemName: "arrow.counterclockwise", accessibilityLabel: "Reset scanner") {
-                resetScanner()
+            CircularIconButton(systemName: "arrow.triangle.2.circlepath.camera", accessibilityLabel: "Switch camera") {
+                cameraPosition = (cameraPosition == .back) ? .front : .back
             }
-            .disabled(isScanning && !isLoading)
         })
     }
 
@@ -207,6 +214,7 @@ struct ScannerTabView: View {
             lookupTask = nil
             coverPipeline?.cancel()
             coverPipeline = nil
+            errorMessage = nil
             isLoading = false
             isScanning = false
             activeSheet = .manualEntry(initialISBN: scannedCode)

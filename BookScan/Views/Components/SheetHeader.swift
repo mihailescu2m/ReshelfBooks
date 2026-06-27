@@ -24,11 +24,15 @@ enum SheetStyle {
 
 // MARK: - Circular icon button
 
-/// A circular icon button for sheet headers, built on the native bordered button
-/// styles so it gets the system press animation, border, and (on iOS 26) Liquid-Glass
-/// treatment for free — matching the share-sheet's circular buttons. The `prominent`
-/// variant is the filled accent circle (✓ "Done"); the plain variant is the neutral
-/// circle (✕, ‹, share / add / reset). Disabled dimming is handled by the style.
+/// A circular icon button for sheet headers, matching the share-sheet's circular
+/// buttons. The `prominent` variant is the filled accent circle (✓ "Done"); the plain
+/// variant is the neutral circle (✕, ‹, share / add / switch-camera).
+///
+/// On **iOS 26+** it uses the native Liquid Glass button styles (`.glass` /
+/// `.glassProminent`), so it gets the real frosted-glass material and Apple's fluid
+/// interactive press animation. On **iOS 18–25** it falls back to a hand-rolled style
+/// (`CircularButtonStyle`) that flat-fills the circle and animates a ~10% grow + lighten
+/// on press — see docs/custom-circular-button-animation.md.
 struct CircularIconButton: View {
     let systemName: String
     var prominent: Bool = false
@@ -38,35 +42,104 @@ struct CircularIconButton: View {
     var accessibilityLabel: String
     let action: () -> Void
 
-    var body: some View {
-        Group {
-            if prominent {
-                Button(action: action) { glyph }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.accentColor)
-            } else {
-                Button(action: action) { glyph }
-                    .buttonStyle(.bordered)
-                    // Neutral (gray) circle with a primary-colored glyph, like the
-                    // system close button — primary tint gives a translucent gray fill
-                    // that adapts to light/dark, with a primary-colored symbol.
-                    .tint(.primary)
-            }
-        }
-        .buttonBorderShape(.circle)
-        .controlSize(.regular)
-        .accessibilityLabel(accessibilityLabel)
-    }
+    /// Circle diameter for the iOS 26 glass buttons — matches the ~48pt share-sheet
+    /// buttons (and the legacy fallback size). Single knob for fine-tuning.
+    private static let glassDiameter: CGFloat = 48
 
     private var glyph: some View {
         Image(systemName: systemName)
-            .font(.system(size: 23, weight: .semibold))
+            .font(.system(size: 22, weight: .semibold))
             .offset(y: glyphYOffset)
-            // Uniform square label box, sized (with .controlSize(.regular) padding) so
-            // the circle lands near the ~48pt of the system share-sheet buttons. It
-            // also keeps every button the same circle regardless of glyph bounding box
-            // (square.and.arrow.up is taller than plus).
-            .frame(width: 32, height: 32)
+    }
+
+    var body: some View {
+        // The action fires immediately (non-blocking) on every path.
+        if #available(iOS 26.0, *) {
+            // Explicit-size glass circle (not the .glass button style, whose controlSize
+            // steps jump from too-small to too-big) with the native interactive press.
+            Button(action: action) {
+                glyph
+                    .foregroundStyle(prominent ? Color.white : Color.primary)
+                    .frame(width: Self.glassDiameter, height: Self.glassDiameter)
+                    .glassEffect(
+                        prominent ? .regular.tint(.accentColor).interactive() : .regular.interactive(),
+                        in: .circle
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibilityLabel)
+        } else {
+            Button(action: action) { glyph }
+                .buttonStyle(CircularButtonStyle(prominent: prominent))
+                .accessibilityLabel(accessibilityLabel)
+        }
+    }
+}
+
+/// Shared timing for the circular-button press bounce.
+enum CircularButtonPress {
+    /// Minimum time the button stays enlarged after the press begins, so even a quick
+    /// tap (where the finger lifts almost immediately) still shows the grow before it
+    /// springs back.
+    static let holdDuration: Double = 0.13
+}
+
+/// Draws the circular fill (accent when prominent, neutral gray otherwise) and the
+/// press feedback: a ~10% grow plus a translucent-white blend over the fill (so the
+/// color reads lighter while the glyph itself stays crisp). The fixed 48pt frame keeps
+/// every button the same circle regardless of its glyph's bounding box.
+struct CircularButtonStyle: ButtonStyle {
+    var prominent: Bool = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        PressableCircle(prominent: prominent, configuration: configuration)
+    }
+}
+
+/// The rendered circle. Latches the press state so the grow is visible for at least
+/// `holdDuration` even on a sub-frame tap, then springs back over `returnDuration`.
+private struct PressableCircle: View {
+    let prominent: Bool
+    let configuration: ButtonStyleConfiguration
+
+    /// Diameter at rest — matches the ~48pt of the system share-sheet buttons.
+    private let diameter: CGFloat = 48
+    /// Press grow factor (medium).
+    private let pressedScale: CGFloat = 1.10
+    /// White blend applied to the fill while pressed.
+    private let pressedLighten: Double = 0.30
+
+    @State private var visualPressed = false
+    @State private var pressStarted: Date?
+
+    var body: some View {
+        configuration.label
+            .foregroundStyle(prominent ? Color.white : Color.primary)
+            .frame(width: diameter, height: diameter)
+            .background {
+                ZStack {
+                    (prominent ? Color.accentColor : Color(.systemGray5))
+                    // Lighten the fill (under the glyph, so the symbol stays crisp).
+                    Color.white.opacity(visualPressed ? pressedLighten : 0)
+                }
+                .clipShape(Circle())
+            }
+            .scaleEffect(visualPressed ? pressedScale : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: visualPressed)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed {
+                    visualPressed = true
+                    pressStarted = Date()
+                } else {
+                    // Hold the enlarge for the remainder of the minimum duration so a
+                    // quick tap's grow doesn't vanish the instant the finger lifts.
+                    let elapsed = pressStarted.map { Date().timeIntervalSince($0) } ?? CircularButtonPress.holdDuration
+                    let remaining = max(0, CircularButtonPress.holdDuration - elapsed)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + remaining) {
+                        visualPressed = false
+                    }
+                }
+            }
     }
 }
 
@@ -107,9 +180,20 @@ struct SheetHeaderBar<Leading: View, Trailing: View>: View {
             // `ignoresSafeArea` extends the fill up through the status-bar region on
             // full-screen tabs (a no-op inside sheets, where the top inset is zero),
             // so content can never show above the bar.
-            Rectangle()
-                .fill(background)
+            headerBackground
                 .ignoresSafeArea(edges: .top)
+        }
+    }
+
+    @ViewBuilder
+    private var headerBackground: some View {
+        if #available(iOS 26.0, *) {
+            // Translucent on iOS 26: content scrolling beneath frosts through the bar
+            // and the Liquid Glass buttons refract it, for the full glass look. (Older
+            // iOS keeps the opaque, seamless bar that matches the surface below.)
+            Rectangle().fill(.ultraThinMaterial)
+        } else {
+            Rectangle().fill(background)
         }
     }
 }

@@ -88,6 +88,15 @@
     "Bring Them Back" : {
 
     },
+    "Camera access denied.\nPlease enable in Settings." : {
+
+    },
+    "Camera not available" : {
+
+    },
+    "Camera setup failed.\n%@" : {
+
+    },
     "Can't Join Library" : {
 
     },
@@ -98,6 +107,15 @@
 
     },
     "Clear search" : {
+
+    },
+    "Could not add metadata output to capture session." : {
+
+    },
+    "Could not add video input to capture session." : {
+
+    },
+    "Could not create video input: %@" : {
 
     },
     "Could not parse book data" : {
@@ -248,6 +266,9 @@
 
     },
     "Place this book on:" : {
+
+    },
+    "Position barcode within frame" : {
 
     },
     "Recent — tap to lend now" : {

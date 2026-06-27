@@ -84,7 +84,7 @@ struct ContentView: View {
                 showingSearch = true
             } label: {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(.primary)
                     .padding(22)
                     .background(.ultraThinMaterial)
