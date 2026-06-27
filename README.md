@@ -50,6 +50,8 @@ If BookScan saves you time or you just find it useful, a small donation is great
 
 ### Scanning & Lookup
 - **Instant barcode scanning** — point the camera at an EAN-13 / ISBN-13 barcode and the book is identified in under a second
+- **Sharp close-up focus** — autofocus is biased to near range and the zoom self-calibrates to the camera's minimum focus distance, so barcodes stay crisp up close even on iPhone Pro models
+- **Front / back camera switch** — flip cameras from the scanner header (rear by default on iPhone, front on iPad) with a flip animation
 - **Manual ISBN entry** — type any ISBN-10 or ISBN-13 (with full check-digit validation) when a barcode is too worn to scan
 - **Seven-source lookup engine** — two tiers, each raced in parallel with first-hit-wins: Open Library and Google Books first; if both miss, five more sources (Open Library's search index, Crossref, the Library of Congress, Trove, and Inventaire) race next. Each covers a different sweet spot (classics & library-catalogued, popular modern, contemporary popular fiction & non-fiction, academic & textbooks, niche US-published & children's, Australian-published, multilingual European editions) so almost every book is found — fast
 - **Background cover search** — cover art is hunted in parallel with the metadata lookup (never delaying the New Book sheet) and keeps searching in the background after the book is saved, attaching the cover while the next book is already being scanned
@@ -103,8 +105,8 @@ If BookScan saves you time or you just find it useful, a small donation is great
 
 | | Minimum |
 |---|---|
-| iOS | 18.0 |
-| Xcode | 16.0 |
+| iOS | 18.0 (Liquid Glass styling on iOS 26+) |
+| Xcode | 26.0 (the iOS 26 SDK is needed to build the Liquid Glass UI) |
 | Swift | 5.0 |
 | iCloud account | Required for sync (app works offline without one) |
 
