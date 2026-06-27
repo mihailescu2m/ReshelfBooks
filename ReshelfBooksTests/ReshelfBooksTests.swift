@@ -1,6 +1,6 @@
 //
-//  BookScanTests.swift
-//  BookScanTests
+//  ReshelfBooksTests.swift
+//  ReshelfBooksTests
 //
 //  Created by Marian Mihailescu on 29/1/2026.
 //
@@ -9,7 +9,7 @@ import Testing
 import CoreData
 import Foundation
 import UIKit
-@testable import BookScan
+@testable import ReshelfBooks
 
 // MARK: - Core Data test helpers
 
@@ -463,6 +463,48 @@ struct LeaveRestoreTests {
         persistence.restoreContributedBooks()
         let books = (try? persistence.viewContext.fetch(Book.fetchRequestAll())) ?? []
         #expect(books.isEmpty)
+    }
+}
+
+// MARK: - Shelf Reorder (sortOrder) Tests
+
+@Suite("Shelf Reorder Tests")
+struct ShelfReorderTests {
+
+    @Test("New books append to the end of their shelf's order")
+    func newBooksAppend() {
+        let p = PersistenceController(inMemory: true)
+        let shelf = p.makeShelf(name: "Fiction")
+        let dune = p.makeBook(isbn: "9780441013593", title: "Dune", author: "Herbert", yearPublished: "1965", coverImageURL: nil, shelf: shelf)
+        let hobbit = p.makeBook(isbn: "9780547928227", title: "The Hobbit", author: "Tolkien", yearPublished: "1937", coverImageURL: nil, shelf: shelf)
+        #expect(dune.sortOrder == 0)
+        #expect(hobbit.sortOrder == 1)
+    }
+
+    @Test("nextSortOrder is one past the current maximum")
+    func nextSortOrderIsMaxPlusOne() {
+        let p = PersistenceController(inMemory: true)
+        let shelf = p.makeShelf(name: "Fiction")
+        #expect(p.nextSortOrder(in: shelf) == 0)   // empty
+        p.makeBook(isbn: "9780441013593", title: "Dune", author: "Herbert", yearPublished: "1965", coverImageURL: nil, shelf: shelf)
+        p.makeBook(isbn: "9780547928227", title: "The Hobbit", author: "Tolkien", yearPublished: "1937", coverImageURL: nil, shelf: shelf)
+        #expect(p.nextSortOrder(in: shelf) == 2)
+    }
+
+    @Test("Moving a book to another shelf appends it there")
+    func movingAppendsToNewShelf() {
+        let p = PersistenceController(inMemory: true)
+        let fiction = p.makeShelf(name: "Fiction")
+        let scifi = p.makeShelf(name: "Sci-Fi")
+        p.makeBook(isbn: "9780547928227", title: "The Hobbit", author: "Tolkien", yearPublished: "1937", coverImageURL: nil, shelf: scifi)
+        p.makeBook(isbn: "9780451524935", title: "1984", author: "Orwell", yearPublished: "1949", coverImageURL: nil, shelf: scifi)
+        let mover = p.makeBook(isbn: "9780441013593", title: "Dune", author: "Herbert", yearPublished: "1965", coverImageURL: nil, shelf: fiction)
+        #expect(mover.sortOrder == 0)
+
+        // Simulate the shelf picker's move-to-end behaviour.
+        mover.shelf = scifi
+        mover.sortOrder = p.nextSortOrder(in: scifi, excluding: mover)
+        #expect(mover.sortOrder == 2)   // appended after the two existing Sci-Fi books
     }
 }
 

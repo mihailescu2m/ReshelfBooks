@@ -1,6 +1,6 @@
 //
 //  Book.swift
-//  BookScan
+//  ReshelfBooks
 //
 //  Created by Marian Mihailescu on 29/1/2026.
 //
@@ -27,6 +27,10 @@ public final class Book: NSManagedObject {
     @NSManaged public var borrower: String?
     /// When the book was lent. Set in `lend(to:borrower:)`, cleared in `returnBook()`.
     @NSManaged public var dateLent: Date?
+    /// Manual position within a regular shelf, for drag-to-reorder. Default 0 → the shelf
+    /// falls back to alphabetical order (the sort tiebreaks on title). New/moved books are
+    /// assigned the next value so they append to the end of their shelf.
+    @NSManaged public var sortOrder: Int64
 
     // CloudKit requires every relationship to be optional and have an inverse.
     @NSManaged public var library: Library?

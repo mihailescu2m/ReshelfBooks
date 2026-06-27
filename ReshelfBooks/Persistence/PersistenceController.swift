@@ -1,6 +1,6 @@
 //
 //  PersistenceController.swift
-//  BookScan
+//  ReshelfBooks
 //
 //  Created by Marian Mihailescu on 6/6/2026.
 //
@@ -15,7 +15,7 @@ import CloudKit
 import Combine
 import os.log
 
-private let logger = Logger(subsystem: "com.bookscan", category: "Persistence")
+private let logger = Logger(subsystem: "com.reshelfbooks", category: "Persistence")
 
 /// Value-type copy of a contributed book, captured at the moment a participant leaves
 /// a shared library — BEFORE CloudKit's zone purge deletes the local records — so the
@@ -98,7 +98,7 @@ final class PersistenceController: ObservableObject {
     init(inMemory: Bool = false) {
         self.inMemory = inMemory
         container = NSPersistentCloudKitContainer(
-            name: "BookScan",
+            name: "ReshelfBooks",
             managedObjectModel: Self.makeManagedObjectModel()
         )
         // Honor a "reset everything" request from iOS Settings BEFORE the stores load.
@@ -123,7 +123,7 @@ final class PersistenceController: ObservableObject {
         guard let privateDescription = container.persistentStoreDescriptions.first else {
             fatalError("Expected an initial persistent store description")
         }
-        privateDescription.url = baseURL.appendingPathComponent("BookScan.sqlite")
+        privateDescription.url = baseURL.appendingPathComponent("ReshelfBooks.sqlite")
         privateDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
         privateDescription.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
         let privateOptions = NSPersistentCloudKitContainerOptions(containerIdentifier: Self.containerID)
@@ -134,7 +134,7 @@ final class PersistenceController: ObservableObject {
         guard let sharedDescription = privateDescription.copy() as? NSPersistentStoreDescription else {
             fatalError("Could not copy private store description")
         }
-        sharedDescription.url = baseURL.appendingPathComponent("BookScan-shared.sqlite")
+        sharedDescription.url = baseURL.appendingPathComponent("ReshelfBooks-shared.sqlite")
         let sharedOptions = NSPersistentCloudKitContainerOptions(containerIdentifier: Self.containerID)
         sharedOptions.databaseScope = .shared
         sharedDescription.cloudKitContainerOptions = sharedOptions
@@ -196,7 +196,7 @@ final class PersistenceController: ObservableObject {
 
         // 1. Delete the local store files so this launch starts empty.
         let base = NSPersistentContainer.defaultDirectoryURL()
-        for store in ["BookScan.sqlite", "BookScan-shared.sqlite"] {
+        for store in ["ReshelfBooks.sqlite", "ReshelfBooks-shared.sqlite"] {
             for suffix in ["", "-wal", "-shm"] {
                 try? FileManager.default.removeItem(at: base.appendingPathComponent(store + suffix))
             }
@@ -391,7 +391,17 @@ final class PersistenceController: ObservableObject {
         book.coverImageURL = coverImageURL
         book.library = library
         book.shelf = shelf
+        // Append to the end of the target shelf's manual order.
+        if let shelf { book.sortOrder = nextSortOrder(in: shelf, excluding: book) }
         return book
+    }
+
+    /// The manual position a book should take to land at the END of `shelf`
+    /// (one past the current maximum). `excluding` skips a book already attached to the
+    /// shelf (e.g. the one being created/moved) so it doesn't count itself.
+    func nextSortOrder(in shelf: Shelf, excluding book: Book? = nil) -> Int64 {
+        let maxOrder = shelf.bookList.filter { $0 != book }.map(\.sortOrder).max() ?? -1
+        return maxOrder + 1
     }
 
     /// The lending shelf, creating it lazily if asked.

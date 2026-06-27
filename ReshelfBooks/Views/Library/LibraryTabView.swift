@@ -1,12 +1,13 @@
 //
 //  LibraryTabView.swift
-//  BookScan
+//  ReshelfBooks
 //
 //  Created by Marian Mihailescu on 29/1/2026.
 //
 
 import SwiftUI
 import CoreData
+import UniformTypeIdentifiers
 
 struct LibraryTabView: View {
     @EnvironmentObject private var persistence: PersistenceController
@@ -241,7 +242,8 @@ struct LibraryTabView: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 16) {
+                // Top-aligned so covers line up even when some titles wrap to two lines.
+                LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(unshelvedBooks) { book in
                         BookCardView(book: book) {
                             selectedBook = book
@@ -314,18 +316,44 @@ struct LendingShelfSectionView: View {
 // MARK: - Regular Shelf Section
 
 struct ShelfSectionView: View {
+    @EnvironmentObject private var persistence: PersistenceController
     @ObservedObject var shelf: Shelf
     let onBookTap: (Book) -> Void
     let onDeleteShelf: () -> Void
 
     @State private var showingDeleteConfirmation = false
+    /// Working copy of the shelf's books in display order, so a drag can reorder them
+    /// live (with animation) before the new positions are persisted on drop.
+    @State private var orderedBooks: [Book] = []
+    /// The book currently being dragged. Tracked only to drive the reorder math — it
+    /// intentionally changes nothing visual (no dimming), so a stale value left by a drag
+    /// released outside any drop target is harmless and simply overwritten by the next drag.
+    @State private var draggingBook: Book?
 
+    /// Manual order: by `sortOrder`, then title — so an un-reordered shelf (all sortOrder 0)
+    /// still reads alphabetically.
     private var sortedBooks: [Book] {
-        shelf.bookList.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        shelf.bookList.sorted {
+            $0.sortOrder != $1.sortOrder
+                ? $0.sortOrder < $1.sortOrder
+                : $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
     }
 
     private var bookCount: Int {
         shelf.books?.count ?? 0
+    }
+
+    /// Seed/refresh the working order from the shelf (skipped mid-drag).
+    private func syncOrderFromShelf() { orderedBooks = sortedBooks }
+
+    /// Persist the dragged order: assign each book its index as `sortOrder`, then save.
+    private func commitOrder() {
+        for (index, book) in orderedBooks.enumerated() where book.sortOrder != Int64(index) {
+            book.sortOrder = Int64(index)
+        }
+        persistence.save()
+        draggingBook = nil
     }
 
     var body: some View {
@@ -364,13 +392,39 @@ struct ShelfSectionView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    LazyHStack(spacing: 16) {
-                        ForEach(sortedBooks) { book in
+                    // Top-aligned so covers line up even when some titles wrap to two lines.
+                    LazyHStack(alignment: .top, spacing: 16) {
+                        ForEach(orderedBooks) { book in
                             BookCardView(book: book) {
                                 onBookTap(book)
                             }
+                            // No dimming of the source: only the system's floating drag
+                            // preview (10% larger) follows the finger. Leaving the original
+                            // at full opacity means there is no lifted state that can get
+                            // "stuck" when a drag is released outside any drop target.
+                            .onDrag {
+                                draggingBook = book
+                                return NSItemProvider(object: book.isbn as NSString)
+                            } preview: {
+                                BookCardView(book: book, onTap: {})
+                                    .frame(width: 100)
+                                    .scaleEffect(1.1)
+                            }
+                            .onDrop(of: [.text],
+                                    delegate: BookReorderDropDelegate(item: book,
+                                                                      ordered: $orderedBooks,
+                                                                      dragging: $draggingBook,
+                                                                      onCommit: commitOrder))
                         }
                     }
+                }
+                // Catch-all: a release on empty row space (not on a card) still commits the
+                // current order, so a reorder finished in a gap isn't reverted on next sync.
+                .onDrop(of: [.text], delegate: ShelfDropResetDelegate(dragging: $draggingBook, onCommit: commitOrder))
+                .onAppear { syncOrderFromShelf() }
+                .onChange(of: shelf.bookList.map(\.objectID)) { _, _ in
+                    // Re-sync on add / remove / sync — but never disturb an in-progress drag.
+                    if draggingBook == nil { syncOrderFromShelf() }
                 }
             }
         }
@@ -385,6 +439,47 @@ struct ShelfSectionView: View {
                 onDeleteShelf()
             }
         }
+    }
+}
+
+/// Reorders the working list live as the dragged book hovers over another card, and
+/// persists the new order on drop. Within a single shelf only.
+private struct BookReorderDropDelegate: DropDelegate {
+    let item: Book
+    @Binding var ordered: [Book]
+    @Binding var dragging: Book?
+    let onCommit: () -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging, dragging != item,
+              let from = ordered.firstIndex(of: dragging),
+              let to = ordered.firstIndex(of: item),
+              ordered[to] != dragging else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            ordered.move(fromOffsets: IndexSet(integer: from),
+                         toOffset: to > from ? to + 1 : to)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        onCommit()
+        return true
+    }
+}
+
+/// Row-level fallback: when a drag is released over empty shelf space (not on a card),
+/// the per-card delegates never fire, so this commits the current order.
+private struct ShelfDropResetDelegate: DropDelegate {
+    @Binding var dragging: Book?
+    let onCommit: () -> Void
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        onCommit()
+        return true
     }
 }
 

@@ -1,6 +1,6 @@
 //
-//  BookScanModel.swift
-//  BookScan
+//  ReshelfBooksModel.swift
+//  ReshelfBooks
 //
 //  Created by Marian Mihailescu on 6/6/2026.
 //
@@ -58,7 +58,11 @@ extension PersistenceController {
             // lend(to:borrower:) and cleared in returnBook(). NOTE: same Production
             // CloudKit schema deploy requirement as contributedBy above.
             attribute("borrower", .stringAttributeType, optional: true),
-            attribute("dateLent", .dateAttributeType, optional: true)
+            attribute("dateLent", .dateAttributeType, optional: true),
+            // Manual position within a (regular) shelf, for drag-to-reorder. Default 0,
+            // so untouched shelves fall back to alphabetical (sort tiebreaks on title).
+            // NOTE: same Production CloudKit schema deploy requirement as the fields above.
+            attribute("sortOrder", .integer64AttributeType, optional: false, defaultValue: 0)
         ]
 
         // MARK: Relationships (created in pairs, then linked as inverses)

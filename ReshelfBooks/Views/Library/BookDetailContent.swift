@@ -1,6 +1,6 @@
 //
 //  BookDetailContent.swift
-//  BookScan
+//  ReshelfBooks
 //
 //  Created by Marian Mihailescu on 30/1/2026.
 //
@@ -242,6 +242,8 @@ struct BookDetailContent: View {
         return Button {
             withAnimation {
                 book.shelf = shelf
+                // Land at the end of the new shelf's manual order.
+                if let shelf { book.sortOrder = persistence.nextSortOrder(in: shelf, excluding: book) }
             }
             persistence.save()
         } label: {
