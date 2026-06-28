@@ -40,6 +40,25 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Reshelf Books needs photo library access to select book cover images</string>
 
+	<!-- Private, in-process-only drag type used to reorder books within a shelf
+	     (registered with .ownProcess visibility). Declared here so the matching
+	     UTType(exportedAs:) resolves without a runtime warning. -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.reshelfbooks.book</string>
+			<key>UTTypeDescription</key>
+			<string>Reshelf Books book</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict/>
+		</dict>
+	</array>
+
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
