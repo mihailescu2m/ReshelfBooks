@@ -52,9 +52,22 @@ struct LibraryTabView: View {
     private var books: FetchedResults<Book>
 
     @State private var showingNewShelfAlert = false
-    @State private var selectedBook: Book?
+    @State private var activeSheet: LibrarySheet?
     @State private var isPreparingShare = false
     @State private var shareUnavailable = false
+
+    /// One sheet for the whole tab. A single `.sheet(item:)` avoids the competing-
+    /// presentation bug that multiple `.sheet` modifiers on one view trigger.
+    private enum LibrarySheet: Identifiable {
+        case book(Book)
+        case reorderShelves
+        var id: String {
+            switch self {
+            case .book(let book): return "book-\(book.objectID.uriRepresentation().absoluteString)"
+            case .reorderShelves: return "reorder-shelves"
+            }
+        }
+    }
 
     // Active-store filter: while participating in a shared library only its shelves
     // and books are shown; the user's own private books stay parked out of sight
@@ -80,11 +93,19 @@ struct LibraryTabView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .newShelfAlert(isPresented: $showingNewShelfAlert)
-            .sheet(item: $selectedBook) { book in
-                BookDetailView(book: book, shelves: visibleShelves)
-                    .presentationDetents([.large])
-                    .presentationSizing(.page)
-                    .standardSheetPresentation()
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .book(let book):
+                    BookDetailView(book: book, shelves: visibleShelves)
+                        .presentationDetents([.large])
+                        .presentationSizing(.page)
+                        .standardSheetPresentation()
+                case .reorderShelves:
+                    ReorderShelvesView(shelves: visibleShelves.regularShelves)
+                        .presentationDetents([.large])
+                        .presentationSizing(.page)
+                        .standardSheetPresentation()
+                }
             }
             .onAppear {
                 persistence.refreshSharedState()
@@ -211,22 +232,27 @@ struct LibraryTabView: View {
     private var libraryContentView: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 24) {
-                // Lending shelf at the top if it has books
+                // Lend shelf — ALWAYS pinned first. Rendered outside the reorderable
+                // ForEach below (and excluded from `regularShelves`), so reordering can
+                // never move it. Shown only when it actually holds lent books.
                 if let lendingShelf = activeLendingShelf, !(lendingShelf.books ?? []).isEmpty {
                     LendingShelfSectionView(
                         shelf: lendingShelf,
                         onBookTap: { book in
-                            selectedBook = book
+                            activeSheet = .book(book)
                         }
                     )
                 }
 
-                // Regular shelves
+                // Regular shelves — the only reorderable section (Reorder Shelves).
                 ForEach(visibleShelves.regularShelves) { shelf in
                     ShelfSectionView(
                         shelf: shelf,
                         onBookTap: { book in
-                            selectedBook = book
+                            activeSheet = .book(book)
+                        },
+                        onReorderShelves: {
+                            activeSheet = .reorderShelves
                         },
                         onDeleteShelf: {
                             deleteShelf(shelf)
@@ -234,6 +260,8 @@ struct LibraryTabView: View {
                     )
                 }
 
+                // Unshelved — ALWAYS pinned last. Not a real shelf (books with no shelf),
+                // so it can't be reordered; shown only when such books exist.
                 if !unshelvedBooks.isEmpty {
                     unshelvedBooksSection
                 }
@@ -271,7 +299,7 @@ struct LibraryTabView: View {
                 LazyHStack(alignment: .top, spacing: 16) {
                     ForEach(unshelvedBooks) { book in
                         BookCardView(book: book) {
-                            selectedBook = book
+                            activeSheet = .book(book)
                         }
                     }
                 }
@@ -344,6 +372,7 @@ struct ShelfSectionView: View {
     @EnvironmentObject private var persistence: PersistenceController
     @ObservedObject var shelf: Shelf
     let onBookTap: (Book) -> Void
+    let onReorderShelves: () -> Void
     let onDeleteShelf: () -> Void
 
     @State private var showingDeleteConfirmation = false
@@ -417,10 +446,18 @@ struct ShelfSectionView: View {
                     .foregroundColor(.secondary)
 
                 Menu {
+                    // This shelf (singular) action.
                     Button(role: .destructive) {
                         showingDeleteConfirmation = true
                     } label: {
                         Label("Delete Shelf", systemImage: "trash")
+                    }
+                    Divider()
+                    // All shelves (plural) action.
+                    Button {
+                        onReorderShelves()
+                    } label: {
+                        Label("Reorder Shelves", systemImage: "arrow.up.arrow.down")
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")

@@ -73,6 +73,9 @@
     "978-0-14-143951-8" : {
 
     },
+    "Add a second shelf to change their order." : {
+
+    },
     "Add to Library" : {
 
     },
@@ -220,6 +223,12 @@
     "Move Into Shared Library" : {
 
     },
+    "Move left" : {
+
+    },
+    "Move right" : {
+
+    },
     "Name" : {
 
     },
@@ -262,6 +271,9 @@
     "Not the right book? Enter ISBN manually" : {
 
     },
+    "Nothing to Reorder" : {
+
+    },
     "OK" : {
 
     },
@@ -272,6 +284,9 @@
 
     },
     "Recent — tap to lend now" : {
+
+    },
+    "Reorder Shelves" : {
 
     },
     "Return" : {
