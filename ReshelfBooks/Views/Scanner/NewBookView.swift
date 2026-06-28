@@ -52,14 +52,19 @@ struct NewBookView: View {
                     notRightBookLink
 
                     shelfSelectionSection
-
-                    Spacer(minLength: 20)
-
-                    saveButton
                 }
                 .padding()
             }
             .scrollsBehindHeader()
+            // Pin the primary action to the bottom so a long shelf list can't push it
+            // off-screen (notably on iPad); the list scrolls above it.
+            .safeAreaInset(edge: .bottom) {
+                saveButton
+                    .padding(.horizontal)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+                    .background(.bar)
+            }
             .newShelfAlert(isPresented: $showingNewShelfAlert) { newShelf in
                 selectedShelf = newShelf
             }
