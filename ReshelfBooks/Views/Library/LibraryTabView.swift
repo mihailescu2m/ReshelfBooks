@@ -26,7 +26,7 @@ enum ShelfReorder {
     static func applyOrder(_ books: [Book]) -> Bool {
         var changed = false
         for (index, book) in books.enumerated()
-        where !book.isDeleted && book.managedObjectContext != nil && book.sortOrder != Int64(index) {
+        where !book.isGone && book.sortOrder != Int64(index) {
             book.sortOrder = Int64(index)
             changed = true
         }

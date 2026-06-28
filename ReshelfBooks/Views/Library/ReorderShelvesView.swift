@@ -65,7 +65,7 @@ struct ReorderShelvesView: View {
         orderedShelves.move(fromOffsets: source, toOffset: destination)
         var changed = false
         for (index, shelf) in orderedShelves.enumerated()
-        where !shelf.isDeleted && shelf.managedObjectContext != nil && shelf.sortOrder != Int64(index) {
+        where !shelf.isGone && shelf.sortOrder != Int64(index) {
             shelf.sortOrder = Int64(index)
             changed = true
         }

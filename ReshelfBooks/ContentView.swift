@@ -12,6 +12,40 @@ struct ContentView: View {
     @State private var selectedTab = 1
     @State private var showingSearch = false
 
+    /// The family-sharing alerts, collapsed into one case set so a single `.alert`
+    /// modifier drives them — three separate `.alert` modifiers on one view can
+    /// compete for the single presentation slot if two conditions are ever set at once.
+    private enum LibraryAlert: Identifiable {
+        case joinedSharedLibrary(bookCount: Int)
+        case leftSharedLibrary(bookCount: Int)
+        case joinBlocked(reason: String)
+
+        var id: Int {
+            switch self {
+            case .joinedSharedLibrary: 0
+            case .leftSharedLibrary: 1
+            case .joinBlocked: 2
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .joinedSharedLibrary: String(localized: "Joined Shared Library")
+            case .leftSharedLibrary: String(localized: "Left Shared Library")
+            case .joinBlocked: String(localized: "Can't Join Library")
+            }
+        }
+    }
+
+    /// The single alert to show, derived from persistence's published state. Priority
+    /// order resolves the (practically impossible) case where more than one is set.
+    private var activeAlert: LibraryAlert? {
+        if let reason = persistence.joinBlockedReason { return .joinBlocked(reason: reason) }
+        if let count = persistence.pendingJoinLocalBookCount { return .joinedSharedLibrary(bookCount: count) }
+        if let snapshot = persistence.pendingLeaveSnapshot { return .leftSharedLibrary(bookCount: snapshot.count) }
+        return nil
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             // Tab content
@@ -31,38 +65,36 @@ struct ContentView: View {
             SearchView()
                 .standardSheetPresentation()
         }
-        // Shown only after joining a shared library while the joiner still has local
-        // books: park them privately (hidden until the share ends) or move them in.
-        .alert("Joined Shared Library", isPresented: Binding(
-            get: { persistence.pendingJoinLocalBookCount != nil },
-            set: { if !$0 { persistence.keepLocalDataAfterJoin() } }
-        )) {
-            Button("Keep My Books Private") { persistence.keepLocalDataAfterJoin() }
-            Button("Move Into Shared Library") { persistence.moveLocalBooksIntoSharedLibrary() }
-        } message: {
-            // Inflection markup pluralizes "book" with the count and stays localizable.
-            Text("You have ^[\(persistence.pendingJoinLocalBookCount ?? 0) book](inflect: true) in your own library. Keep them private, or move them into the shared library?")
-        }
-        // Shown when a participant leaves a shared library they had moved books into:
-        // bring those books back (with their current shelves) or leave them behind.
-        .alert("Left Shared Library", isPresented: Binding(
-            get: { persistence.pendingLeaveSnapshot != nil },
-            set: { if !$0 { persistence.discardLeaveSnapshot() } }
-        )) {
-            Button("Bring Them Back") { persistence.restoreContributedBooks() }
-            Button("Leave Them", role: .destructive) { persistence.discardLeaveSnapshot() }
-        } message: {
-            Text("You brought ^[\(persistence.pendingLeaveSnapshot?.count ?? 0) book](inflect: true) into the shared library. Bring them back to your library?")
-        }
-        // Shown when a share invitation is declined because the user already owns a
-        // shared library of their own.
-        .alert("Can't Join Library", isPresented: Binding(
-            get: { persistence.joinBlockedReason != nil },
-            set: { if !$0 { persistence.joinBlockedReason = nil } }
-        )) {
-            Button("OK", role: .cancel) { persistence.joinBlockedReason = nil }
-        } message: {
-            Text(persistence.joinBlockedReason ?? "")
+        // One family-sharing alert. The buttons are the sole drivers of the outcome;
+        // the isPresented setter is intentionally a no-op so dismissing can never undo a
+        // button's choice — e.g. "Move Into Shared Library" arms the move, and a "keep"
+        // side effect in the setter would silently disarm it. Alerts only dismiss via
+        // their buttons (which already clear the underlying state), so nothing is lost.
+        .alert(
+            activeAlert?.title ?? "",
+            isPresented: Binding(get: { activeAlert != nil }, set: { _ in }),
+            presenting: activeAlert
+        ) { alert in
+            switch alert {
+            case .joinedSharedLibrary:
+                Button("Keep My Books Private") { persistence.keepLocalDataAfterJoin() }
+                Button("Move Into Shared Library") { persistence.moveLocalBooksIntoSharedLibrary() }
+            case .leftSharedLibrary:
+                Button("Bring Them Back") { persistence.restoreContributedBooks() }
+                Button("Leave Them", role: .destructive) { persistence.discardLeaveSnapshot() }
+            case .joinBlocked:
+                Button("OK", role: .cancel) { persistence.joinBlockedReason = nil }
+            }
+        } message: { alert in
+            switch alert {
+            case .joinedSharedLibrary(let count):
+                // Inflection markup pluralizes "book" with the count and stays localizable.
+                Text("You have ^[\(count) book](inflect: true) in your own library. Keep them private, or move them into the shared library?")
+            case .leftSharedLibrary(let count):
+                Text("You brought ^[\(count) book](inflect: true) into the shared library. Bring them back to your library?")
+            case .joinBlocked(let reason):
+                Text(reason)
+            }
         }
     }
 
@@ -76,7 +108,7 @@ struct ContentView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
             .background(.ultraThinMaterial)
-            .cornerRadius(25)
+            .clipShape(RoundedRectangle(cornerRadius: 25))
             .shadow(color: .black.opacity(0.15), radius: 10, y: 5)
 
             // Search button (always visible)
@@ -116,7 +148,7 @@ struct ContentView: View {
             .padding(.horizontal, selectedTab == tag ? 16 : 12)
             .padding(.vertical, 10)
             .background(selectedTab == tag ? Color.accentColor.opacity(0.15) : Color.clear)
-            .cornerRadius(20)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
         }
         .buttonStyle(.plain)
     }
